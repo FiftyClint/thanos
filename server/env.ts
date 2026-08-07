@@ -91,14 +91,43 @@ const schema = z
 
 export type Env = z.infer<typeof schema>;
 
+/**
+ * Turn a validation failure into something actionable in a deploy log.
+ *
+ * The distinction that matters: a variable set to an empty string is, to Zod,
+ * identical to one that was never set — both report "is required". On a hosting
+ * platform those are very different situations. Railway's `${{Service.VAR}}`
+ * syntax resolves to an empty string when the service name doesn't match, so
+ * "I definitely set that one" and "the app says it's missing" are both true at
+ * once. Say so, rather than making someone guess.
+ */
+export function formatEnvError(error: z.ZodError, source: Record<string, string | undefined>): string {
+  const lines = ["Invalid environment configuration:"];
+
+  for (const issue of error.issues) {
+    const name = issue.path.join(".") || "(root)";
+    lines.push(`  - ${name}: ${issue.message}`);
+
+    if (source[name] === "") {
+      lines.push(
+        `      ${name} is set but EMPTY. If it holds a platform variable reference`,
+        `      (e.g. Railway's \${{Postgres.DATABASE_URL}}), the referenced service`,
+        `      name probably doesn't match — a bad reference resolves to "".`,
+      );
+    } else if (!(name in source)) {
+      lines.push(`      ${name} is not set at all.`);
+    }
+  }
+
+  lines.push("", "See .env.example for what each variable does.");
+  return lines.join("\n");
+}
+
 function load(): Env {
   const parsed = schema.safeParse(process.env);
   if (!parsed.success) {
-    const details = parsed.error.issues
-      .map((i) => `  - ${i.path.join(".") || "(root)"}: ${i.message}`)
-      .join("\n");
     // Thrown before the logger exists, so write plainly and exit.
-    console.error(`Invalid environment configuration:\n${details}\n`);
+    console.error(formatEnvError(parsed.error, process.env));
     process.exit(1);
   }
   return parsed.data;
