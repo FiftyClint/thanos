@@ -1,0 +1,30 @@
+# Railway deployment config.
+#
+# Railway reads this automatically. It builds the Dockerfile, watches
+# /api/health to know when the app is actually ready, and restarts on crash.
+#
+# What still has to be done in the Railway dashboard (once):
+#   1. Add a PostgreSQL database to the project.
+#   2. On this service, set DATABASE_URL to  ${{Postgres.DATABASE_URL}}
+#   3. Set SESSION_SECRET to a long random string.
+#   4. Attach a volume mounted at /data — this is where progress photos live.
+#   5. Generate a public domain so your phone can reach it.
+#
+# Full walkthrough in README.md → "Deploying → Railway".
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+# Railway polls this until it returns 200 before sending real traffic to a new
+# build, so a deploy can't drop a request while migrations are still running.
+healthcheckPath = "/api/health"
+healthcheckTimeout = 120
+
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+
+# A volume attaches to one instance, so photos would be invisible to a second
+# copy of the app. Stay at one replica, or move to FILE_STORE=s3 to scale out.
+numReplicas = 1

@@ -28,24 +28,28 @@ ENV NODE_ENV=production \
 WORKDIR /app
 
 # tini reaps zombies and forwards SIGTERM, so graceful shutdown actually works.
+# util-linux provides setpriv, which the entrypoint uses to drop root.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends tini curl \
+    && apt-get install -y --no-install-recommends tini curl util-linux \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/migrations ./migrations
 COPY --from=build /app/package.json ./package.json
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 
 # The client build is served from dist/public, next to the server bundle.
-RUN mkdir -p /data && chown -R node:node /data /app
-
-USER node
+RUN chmod +x /app/docker-entrypoint.sh \
+    && mkdir -p /data \
+    && chown -R node:node /data /app
 
 EXPOSE 5000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD curl -fsS http://127.0.0.1:${PORT}/api/health || exit 1
 
-ENTRYPOINT ["/usr/bin/tini", "--"]
+# Starts as root only to take ownership of the mounted photo volume, then execs
+# the server as the unprivileged `node` user. See docker-entrypoint.sh.
+ENTRYPOINT ["/usr/bin/tini", "--", "/app/docker-entrypoint.sh"]
 CMD ["node", "dist/index.js"]

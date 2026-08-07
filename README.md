@@ -46,12 +46,67 @@ CORS or proxy config to think about.
 
 ## Deploying
 
-The app is a single long-lived Node process plus Postgres and a disk for
-photos. Anything that can run a container will run it.
+The app needs three things wherever it runs: a **Postgres database**, a **disk**
+for progress photos, and an **HTTPS address** (an installed PWA won't work over
+plain HTTP). Everything below is just those three things in different clothing.
+
+### Railway
+
+`railway.toml` is included, so Railway builds the Dockerfile and health-checks
+the app without further configuration. The rest is dashboard clicks, once.
+
+**1 — Create the project**
+
+New Project → *Deploy from GitHub repo* → pick `thanos`. It will start building
+immediately and **the first build will fail**. That's expected: there's no
+database yet. Carry on.
+
+**2 — Add the database**
+
+In the project, *+ New* → *Database* → *Add PostgreSQL*. Railway names the
+service `Postgres`.
+
+**3 — Point the app at it**
+
+Open the **thanos** service → *Variables* → *New Variable*, and add these. The
+`${{...}}` is Railway's own syntax — paste it literally, it fills itself in:
+
+| Variable | Value |
+| --- | --- |
+| `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` |
+| `SESSION_SECRET` | a long random string (see below) |
+| `UPLOAD_DIR` | `/data` |
+| `NODE_ENV` | `production` |
+
+For `SESSION_SECRET`, any 32+ character random string works. On a Mac or Linux
+terminal, `openssl rand -hex 32` prints one. A password manager's generator set
+to 50 characters is equally fine. Keep it — changing it later logs you out.
+
+**4 — Add the photo disk**
+
+thanos service → *Settings* → *Volumes* → *Add Volume*, mount path `/data`.
+Without this, photos vanish on every deploy.
+
+**5 — Get your URL**
+
+*Settings* → *Networking* → *Generate Domain*. That's the HTTPS address for your
+phone. Open it, register your account.
+
+**6 — Close the door**
+
+Once your account exists, add one more variable so nobody else can sign up:
+
+| Variable | Value |
+| --- | --- |
+| `ALLOW_REGISTRATION` | `false` |
+
+If step 5 shows an SSL error in the logs, set `DATABASE_SSL` to `true` — that
+happens when the database is reached over Railway's public proxy rather than its
+private network.
 
 ### Fly.io
 
-`fly.toml` is included and gives you HTTPS, which an installed PWA requires.
+`fly.toml` is included.
 
 ```bash
 fly launch --no-deploy --copy-config
@@ -60,19 +115,14 @@ fly postgres attach thanos-db                    # sets DATABASE_URL
 fly volumes create thanos_data --size 3
 fly secrets set SESSION_SECRET=$(openssl rand -hex 32)
 fly deploy
-```
-
-Then close the door behind you:
-
-```bash
-fly secrets set ALLOW_REGISTRATION=false
+fly secrets set ALLOW_REGISTRATION=false         # after your account exists
 ```
 
 ### Anywhere else
 
-Railway, Render, a VPS with `docker compose`, a Synology — all fine. Provide
-`DATABASE_URL` and `SESSION_SECRET`, mount a volume at `UPLOAD_DIR`, and point
-a domain at port 5000.
+Render, a VPS with `docker compose`, a Synology — all fine. Provide
+`DATABASE_URL` and `SESSION_SECRET`, mount a volume at `UPLOAD_DIR`, and point a
+domain at port 5000.
 
 If your host has no persistent disk, set `FILE_STORE=s3` and point it at any
 S3-compatible bucket (Cloudflare R2, Backblaze B2, MinIO, AWS). See
@@ -81,7 +131,8 @@ S3-compatible bucket (Cloudflare R2, Backblaze B2, MinIO, AWS). See
 ### Installing on your phone
 
 Visit the HTTPS URL, then **Share → Add to Home Screen** (iOS) or the install
-prompt (Android). It runs fullscreen with no browser chrome.
+prompt (Android). It runs fullscreen with no browser chrome, and keeps working
+when the gym has no signal.
 
 ---
 
