@@ -4,9 +4,14 @@ import { logger } from "./logger";
 import { buildApp, finalizeApp } from "./app";
 import { runMigrations } from "./migrate";
 import { syncAllPrograms } from "./seed";
-import { closeDb } from "./db";
+import { closeDb, waitForDatabase, describeDatabaseTarget } from "./db";
 
 async function main(): Promise<void> {
+  // Nothing below works without a database, so establish it first rather than
+  // failing halfway through a migration.
+  logger.info({ target: describeDatabaseTarget() }, "connecting to database");
+  await waitForDatabase();
+
   if (env.AUTO_MIGRATE) {
     await runMigrations();
   }
