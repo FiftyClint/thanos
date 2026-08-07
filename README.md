@@ -57,9 +57,11 @@ the app without further configuration. The rest is dashboard clicks, once.
 
 **1 — Create the project**
 
-New Project → *Deploy from GitHub repo* → pick `thanos`. It will start building
-immediately and **the first build will fail**. That's expected: there's no
-database yet. Carry on.
+New Project → *Deploy from GitHub repo* → pick `thanos`. It builds the default
+branch, so there is no branch to choose.
+
+The first build **will fail**. That's expected — there's no database yet. Carry
+on to step 2.
 
 **2 — Add the database**
 
@@ -84,8 +86,21 @@ to 50 characters is equally fine. Keep it — changing it later logs you out.
 
 **4 — Add the photo disk**
 
-thanos service → *Settings* → *Volumes* → *Add Volume*, mount path `/data`.
-Without this, photos vanish on every deploy.
+Attach a volume to the thanos service with the mount path `/data`. Railway has
+moved this control around, so if one route doesn't match what you see, try the
+next:
+
+- **Right-click the thanos service** card on the project canvas → *Attach Volume*
+- **Command palette**: `Cmd+K` (Mac) or `Ctrl+K`, then type `volume`
+- **+ New** in the project → *Volume*
+- thanos service → *Settings*, scroll to a *Volumes* section
+
+Volumes require a paid Railway plan. If none of the above shows the option,
+that's usually why — either upgrade, or skip the volume and use `FILE_STORE=s3`
+instead (see below).
+
+Without a volume, progress photos are wiped on every deploy. Everything else —
+workouts, check-ins, cardio, vacuum — lives in Postgres and is unaffected.
 
 **5 — Get your URL**
 
@@ -124,9 +139,14 @@ Render, a VPS with `docker compose`, a Synology — all fine. Provide
 `DATABASE_URL` and `SESSION_SECRET`, mount a volume at `UPLOAD_DIR`, and point a
 domain at port 5000.
 
-If your host has no persistent disk, set `FILE_STORE=s3` and point it at any
-S3-compatible bucket (Cloudflare R2, Backblaze B2, MinIO, AWS). See
-`.env.example`.
+### No disk? Use object storage instead
+
+If your host has no persistent disk — or you'd rather not pay for one — set
+`FILE_STORE=s3` and point it at any S3-compatible bucket. Cloudflare R2 has a
+free tier that comfortably covers a season of progress photos. Set `S3_BUCKET`,
+`S3_REGION`, `S3_ENDPOINT`, `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY`; see
+`.env.example`. Photos then upload straight from your phone to the bucket
+without passing through the app, and no volume is needed.
 
 ### Installing on your phone
 
