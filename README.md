@@ -107,6 +107,17 @@ workouts, check-ins, cardio, vacuum — lives in Postgres and is unaffected.
 *Settings* → *Networking* → *Generate Domain*. That's the HTTPS address for your
 phone. Open it, register your account.
 
+**5b — If you get "Application failed to respond"**
+
+Check the deploy log for the line `Thanos Program listening on 0.0.0.0:<port>`.
+If that port isn't the **target port** on your domain (*Settings → Networking*),
+the app is running fine and Railway is knocking on the wrong door — set the
+target port to match. It applies immediately, no redeploy.
+
+This happens because Railway injects its own `PORT` into the environment, which
+the app obeys, while the domain's target port is guessed separately from the
+Dockerfile's `EXPOSE`. The two can disagree.
+
 **6 — Close the door**
 
 Once your account exists, add one more variable so nobody else can sign up:
