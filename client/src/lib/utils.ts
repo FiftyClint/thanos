@@ -5,22 +5,33 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
-// Prep start date: February 1, 2026
+/*
+ * Fallback prep dates.
+ *
+ * These are only used when the athlete has not set their own in Settings.
+ * Previously they were the ONLY source: Settings saved a prep start and show
+ * date to the database that nothing ever read, so every week number and
+ * countdown in the app came from these two constants regardless.
+ */
 export const PREP_START_DATE = new Date("2026-02-01");
-// Show date: October 10, 2026
-export const SHOW_DATE = new Date("2026-10-10");
+export const SHOW_DATE = new Date("2026-11-14");
 
-export function getCurrentWeek(): number {
-  const now = new Date();
-  const diffTime = now.getTime() - PREP_START_DATE.getTime();
-  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+/** Week of prep, counting the first week as 1. */
+export function getCurrentWeek(prepStartDate?: Date | string | null): number {
+  const start = toDate(prepStartDate) ?? PREP_START_DATE;
+  const diffDays = Math.ceil((Date.now() - start.getTime()) / (1000 * 60 * 60 * 24));
   return Math.max(1, Math.ceil(diffDays / 7));
 }
 
-export function getDaysUntilShow(): number {
-  const now = new Date();
-  const diffTime = SHOW_DATE.getTime() - now.getTime();
-  return Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
+export function getDaysUntilShow(showDate?: Date | string | null): number {
+  const show = toDate(showDate) ?? SHOW_DATE;
+  return Math.max(0, Math.ceil((show.getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
+}
+
+function toDate(value: Date | string | null | undefined): Date | null {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 export function getCurrentPhase(weekNumber: number): string {
@@ -49,9 +60,8 @@ export function getPhaseColor(phase: string): string {
   }
 }
 
-export function isDeloadWeek(weekNumber: number): boolean {
-  return weekNumber % 9 === 0 && weekNumber > 0;
-}
+// Was `weekNumber % 9 === 0`, which disagreed with the server's schedule.
+export { isDeloadWeek, SCHEDULED_DELOAD_WEEKS } from "@shared/program-rules";
 
 export function getDayName(day: number): string {
   const days: Record<number, string> = {

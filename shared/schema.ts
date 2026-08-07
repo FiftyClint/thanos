@@ -20,8 +20,15 @@ export const CARDIO_TYPES = ["HIIT", "LISS"] as const;
 export const CARDIO_SUBTYPES = ["Walking", "Incline Treadmill", "Ruck"] as const;
 export const TIMES_OF_DAY = ["Morning", "Afternoon", "Evening"] as const;
 export const SIDES = ["left", "right"] as const;
-/** 36-week prep macrocycle. */
-export const MAX_WEEK = 36;
+/**
+ * Upper bound for a week number, as INPUT VALIDATION — not a program length.
+ *
+ * This was 36, taken from the length of one prep, which made it a time bomb:
+ * a prep running longer than 36 weeks would start failing every workout save
+ * once it passed that week, with a 400 and no explanation. A prep is as long
+ * as it is; this only needs to reject nonsense.
+ */
+export const MAX_WEEK = 104;
 export const TRAINING_DAYS = 6;
 
 // ── Users ───────────────────────────────────────────────────────────────────

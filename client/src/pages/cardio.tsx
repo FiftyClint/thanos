@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient, wasQueued } from "@/lib/queryClient";
 import { getCurrentWeek, getCurrentPhase } from "@/lib/utils";
+import { usePrep } from "@/hooks/use-prep";
 import { Plus, Trash2, Activity, Loader2, Flame } from "lucide-react";
 import { Link } from "wouter";
 import type { CardioSession } from "@shared/schema";
@@ -17,7 +18,7 @@ import { format } from "date-fns";
 
 export default function CardioPage() {
   const { toast } = useToast();
-  const currentWeek = getCurrentWeek();
+  const { currentWeek } = usePrep();
   const phase = getCurrentPhase(currentWeek);
   
   const [showAddForm, setShowAddForm] = useState(false);

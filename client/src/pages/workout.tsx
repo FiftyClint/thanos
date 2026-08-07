@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient, wasQueued } from "@/lib/queryClient";
 import { getCurrentWeek, getCurrentPhase, getDayName, getDayFocus, formatTime, parseRestSeconds, isDeloadWeek } from "@/lib/utils";
+import { usePrep } from "@/hooks/use-prep";
 import ProgramSelector from "@/components/ProgramSelector";
 import { ChevronDown, ChevronUp, Play, Clock, Timer, AlertTriangle, CheckCircle2, X, Pause, RotateCcw, Download, Plus, ArrowLeftRight } from "lucide-react";
 import type { Exercise, SetLog, WorkoutLog, User } from "@shared/schema";
@@ -138,7 +139,7 @@ export default function Workout() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   
-  const currentWeek = getCurrentWeek();
+  const { currentWeek } = usePrep();
   const phase = getCurrentPhase(currentWeek);
   const isDeload = isDeloadWeek(currentWeek);
   

@@ -195,9 +195,25 @@ suite("API", () => {
       expect(history.body[0].sets).toHaveLength(0);
     });
 
-    it("rejects an out-of-range week", async () => {
+    it("rejects a nonsense week", async () => {
       const user = await createUser(app);
-      await user.agent.post("/api/workouts/complete").send({ day: 1, week: 99 }).expect(400);
+      await user.agent.post("/api/workouts/complete").send({ day: 1, week: 0 }).expect(400);
+      await user.agent.post("/api/workouts/complete").send({ day: 1, week: 999 }).expect(400);
+    });
+
+    it("accepts a prep longer than 36 weeks", async () => {
+      // The cap used to be 36 — one prep's length used as a data constraint.
+      // A prep running past it started failing every save with a bare 400.
+      const user = await createUser(app);
+      const exerciseId = await firstWorkingExerciseId(app, user);
+
+      await user.agent
+        .post("/api/workouts/complete")
+        .send({ day: 1, week: 41, sets: [{ exerciseId, setNumber: 1, weightLbs: 100, reps: 8 }] })
+        .expect(200);
+
+      const history = await user.agent.get("/api/workouts/history").expect(200);
+      expect(history.body[0].week).toBe(41);
     });
 
     it("keeps one athlete's workouts out of another's history", async () => {

@@ -66,15 +66,8 @@ export function parseRepRangeMin(repRange: string): number {
   return Number.isNaN(num) ? 6 : num;
 }
 
-export function isDeloadWeek(week: number): boolean {
-  return week === 4 || week === 8 || week === 16 || week === 24 || week === 32;
-}
-
-/** Sets for a given week, trimmed on deload weeks. */
-export function setsForWeek(defaultSets: number, week: number): number {
-  if (!isDeloadWeek(week)) return defaultSets;
-  return Math.max(2, defaultSets - (defaultSets > 3 ? 2 : 1));
-}
+// Deload rules live in shared/ so the client cannot drift from them again.
+export { isDeloadWeek, setsForWeek, SCHEDULED_DELOAD_WEEKS } from "@shared/program-rules";
 
 /** The 36-week prep macrocycle. */
 export function getCurrentPhase(week: number): string {

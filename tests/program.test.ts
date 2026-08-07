@@ -174,3 +174,19 @@ describe("applyProgramRules", () => {
     expect(applyProgramRules(exercises, "phase2", 20)[0].defaultSets).toBe(3);
   });
 });
+
+describe("deload schedule is defined once", () => {
+  it("matches the shared definition the client also uses", async () => {
+    // The client and server each had their own rule, sharing no weeks. Both now
+    // import this one, so they cannot drift apart again.
+    const shared = await import("@shared/program-rules");
+    for (let week = 1; week <= 52; week++) {
+      expect(isDeloadWeek(week), `week ${week}`).toBe(shared.isDeloadWeek(week));
+    }
+  });
+
+  it("is a documented list, not an arithmetic accident", async () => {
+    const { SCHEDULED_DELOAD_WEEKS } = await import("@shared/program-rules");
+    expect([...SCHEDULED_DELOAD_WEEKS]).toEqual([4, 8, 16, 24, 32]);
+  });
+});

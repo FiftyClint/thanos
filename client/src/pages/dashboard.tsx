@@ -9,11 +9,11 @@ import { Calendar, Dumbbell, CheckCircle2, Circle, TrendingUp, AlertTriangle, Sc
 import type { WorkoutLog, WeeklyCheckIn, Recommendation, CardioSession, VacuumSession, User } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { usePrep } from "@/hooks/use-prep";
 
 export default function Dashboard() {
   const { toast } = useToast();
-  const currentWeek = getCurrentWeek();
-  const daysUntilShow = getDaysUntilShow();
+  const { currentWeek, daysUntilShow } = usePrep();
   const phase = getCurrentPhase(currentWeek);
   const isDeload = isDeloadWeek(currentWeek);
 
