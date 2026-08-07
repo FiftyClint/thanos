@@ -40,15 +40,28 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
  * Retrying costs a few seconds in the worst case and nothing in the normal one.
  */
 export async function waitForDatabase(
-  opts: { attempts?: number; baseDelayMs?: number; maxDelayMs?: number } = {},
+  opts: { timeoutMs?: number; baseDelayMs?: number; maxDelayMs?: number } = {},
 ): Promise<void> {
-  const attempts = opts.attempts ?? 12;
+  /*
+   * Bounded by wall-clock time, not attempt count.
+   *
+   * Counting attempts is the obvious approach and the wrong one: a connection
+   * that HANGS (misrouted private network, wrong port, packet-dropping
+   * firewall) burns the full connect timeout each time, so "12 attempts" can
+   * mean over two minutes — longer than the platform's health-check window.
+   * Startup would then fail for taking too long to report a problem it had
+   * already diagnosed. A deadline caps the worst case whatever the failure mode.
+   */
+  const timeoutMs = opts.timeoutMs ?? 30_000;
   const baseDelay = opts.baseDelayMs ?? 400;
-  const maxDelay = opts.maxDelayMs ?? 5_000;
+  const maxDelay = opts.maxDelayMs ?? 4_000;
 
+  const deadline = Date.now() + timeoutMs;
+  let attempt = 0;
   let lastError: unknown;
 
-  for (let attempt = 1; attempt <= attempts; attempt++) {
+  for (;;) {
+    attempt++;
     try {
       const client = await pool.connect();
       try {
@@ -62,14 +75,15 @@ export async function waitForDatabase(
       return;
     } catch (error) {
       lastError = error;
-      if (attempt === attempts) break;
 
       const delay = Math.min(baseDelay * 2 ** (attempt - 1), maxDelay);
+      if (Date.now() + delay >= deadline) break;
+
       logger.warn(
         {
           attempt,
-          of: attempts,
           retryInMs: delay,
+          msRemaining: Math.max(0, deadline - Date.now()),
           target: describeDatabaseTarget(),
           reason: (error as Error).message,
         },
@@ -80,8 +94,8 @@ export async function waitForDatabase(
   }
 
   throw new Error(
-    `Could not reach the database at ${describeDatabaseTarget()} after ${attempts} attempts. ` +
-      `Last error: ${(lastError as Error)?.message}. ` +
+    `Could not reach the database at ${describeDatabaseTarget()} within ${Math.round(timeoutMs / 1000)}s ` +
+      `(${attempt} attempts). Last error: ${(lastError as Error)?.message}. ` +
       `Check DATABASE_URL, that the database service is running, and DATABASE_SSL ` +
       `(managed providers usually need it set to true).`,
   );
