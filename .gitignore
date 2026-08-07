@@ -1,0 +1,15 @@
+node_modules/
+dist/
+coverage/
+data/
+*.log
+
+# Local environment — never commit secrets
+.env
+.env.local
+.env.*.local
+
+.DS_Store
+.vscode/
+.idea/
+node_modules/.cache/

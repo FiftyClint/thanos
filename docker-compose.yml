@@ -1,0 +1,59 @@
+# Thanos Program — app + database, one command.
+#
+#   cp .env.example .env      # set SESSION_SECRET
+#   docker compose up --build
+#   open http://localhost:5000
+#
+# Photos live on the `uploads` volume and the database on `pgdata`; both
+# survive `docker compose down`. Use `down -v` only when you mean to erase them.
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: thanos
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-thanos-local-dev}
+      POSTGRES_DB: thanos
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U thanos -d thanos"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # Not published by default — only the app needs to reach it. Uncomment to
+    # connect a GUI client from the host.
+    # ports:
+    #   - "5432:5432"
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 5000
+      DATABASE_URL: postgres://thanos:${POSTGRES_PASSWORD:-thanos-local-dev}@db:5432/thanos
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env — generate with: openssl rand -hex 32}
+      UPLOAD_DIR: /data
+      AUTO_MIGRATE: "true"
+      AUTO_SEED: "true"
+      ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-true}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Optional Notion mirror — leave unset to keep it off.
+      NOTION_API_KEY: ${NOTION_API_KEY:-}
+      NOTION_DB_TRAINING_SESSIONS: ${NOTION_DB_TRAINING_SESSIONS:-}
+      NOTION_DB_BODY_COMPOSITION: ${NOTION_DB_BODY_COMPOSITION:-}
+      NOTION_DB_BODY_MEASUREMENTS: ${NOTION_DB_BODY_MEASUREMENTS:-}
+      NOTION_DB_DAILY_VITALS: ${NOTION_DB_DAILY_VITALS:-}
+    ports:
+      - "${PORT:-5000}:5000"
+    volumes:
+      - uploads:/data
+
+volumes:
+  pgdata:
+  uploads:

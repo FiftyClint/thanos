@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Typecheck, test, build
+    runs-on: ubuntu-latest
+
+    # The integration suite runs against a real Postgres rather than a mock, so
+    # migrations, constraints and the seeder are all exercised here.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: thanos_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/thanos_test
+      SESSION_SECRET: ci-session-secret-at-least-32-characters-long
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify migrations match the schema
+        # A schema edit without a generated migration would deploy a database
+        # that does not match the code. Fail here instead of at runtime.
+        #
+        # `git status --porcelain`, not `git diff`: a drifted schema produces a
+        # brand-new untracked .sql file, which `git diff` would not report.
+        run: |
+          npx drizzle-kit generate --name ci-drift-check
+          DRIFT="$(git status --porcelain -- migrations/)"
+          if [ -z "$DRIFT" ]; then
+            echo "migrations are in sync"
+          else
+            echo "::error::shared/schema.ts changed without a migration. Run: npm run db:generate"
+            echo "$DRIFT"
+            exit 1
+          fi
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/thanos_test
+
+  docker:
+    name: Docker image builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

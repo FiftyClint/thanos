@@ -1,0 +1,12 @@
+node_modules
+dist
+data
+.git
+.github
+.env
+.env.*
+!.env.example
+*.log
+coverage
+migrations/meta/_journal.json.bak
+.DS_Store

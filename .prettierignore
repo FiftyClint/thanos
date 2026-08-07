@@ -1,0 +1,9 @@
+dist
+coverage
+migrations
+node_modules
+package-lock.json
+client/src/components/ui
+server/seed/phase1.ts
+server/seed/phase2.ts
+server/seed/phase3.ts
