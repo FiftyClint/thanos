@@ -167,6 +167,60 @@ when the gym has no signal.
 
 ---
 
+## Importing history from the old Replit app
+
+A one-time migration that copies your training history out of the Replit
+database into this one. The old database is only ever read from.
+
+```bash
+# Preview — writes nothing
+SOURCE_DATABASE_URL="<the old Replit DATABASE_URL>" \
+  DATABASE_URL="<this app's DATABASE_URL>" \
+  npm run import:replit -- --email you@example.com --dry-run
+
+# Do it
+SOURCE_DATABASE_URL=… DATABASE_URL=… npm run import:replit -- --email you@example.com
+```
+
+Find the old connection string in Replit under the Postgres pane, or as
+`DATABASE_URL` in that project's Secrets. For this app's, use the value your
+host shows for the database it is attached to.
+
+The dry run prints exactly what a real run will import — including how many
+duplicates it will collapse and how many exercises are no longer in the
+program. Read it before committing.
+
+**What moves:** workouts, every set (weight, reps, RIR, side, band notes,
+failure flags), weekly check-ins, cardio, vacuum sessions, and past
+recommendations. If the account doesn't exist here yet, it is recreated with
+the old password hash — so your Replit password still works.
+
+**What doesn't:** progress photos. The rows would import, but the image files
+live in Replit's object storage and would 404. The count is reported so you
+know what was left behind.
+
+### Three things it has to reconcile
+
+**Exercise ids differ.** This database seeded its own, so every set's exercise
+reference is remapped by `(program, day, number, name)`, then by name alone.
+An exercise that has since been renamed or dropped is recreated under a
+`legacy` program rather than dropped — otherwise months of sets would vanish
+with it. `legacy` sits outside the set the seeder manages, so `npm run db:seed`
+leaves those rows alone. They appear in history and exports, not in the
+workout logger.
+
+**The old app had no uniqueness constraints**, and two of its bugs produced
+rows this schema rejects: a re-submitted workout appended a second copy of its
+sets, and a re-submitted check-in inserted a second row for the same week. Both
+are collapsed — sets by `(exercise, set number, side)`, check-ins by keeping
+the most recent submission for each week. Both counts appear in the report.
+
+**Importing twice would interleave two histories**, so the script refuses to
+run against an account that already has workouts. Pass `--replace` to clear
+them first if you are re-running deliberately.
+
+---
+
 ## Configuration
 
 Every variable is validated at boot — the app refuses to start on bad config
