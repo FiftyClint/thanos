@@ -190,3 +190,27 @@ describe("deload schedule is defined once", () => {
     expect([...SCHEDULED_DELOAD_WEEKS]).toEqual([4, 8, 16, 24, 32]);
   });
 });
+
+describe("reduction order matching", () => {
+  it("does not mistake lateral delt work for lat work", async () => {
+    // /lat/ matches "LATeral", so a lateral-delt stall was recommending cutting
+    // lats — the sheet's priority muscle and the one it says to cut LAST.
+    const { REDUCTION_ORDER } = await import("@shared/program-rules");
+    const lats = REDUCTION_ORDER.find((r) => r.rank === 5)!;
+    const laterals = REDUCTION_ORDER.find((r) => r.rank === 6)!;
+
+    expect(lats.match.test("Single-Arm Behind-Body Cable Lateral Raise")).toBe(false);
+    expect(laterals.match.test("Single-Arm Behind-Body Cable Lateral Raise")).toBe(true);
+
+    // Still matches actual lat work.
+    for (const name of ["Lat Pulldown", "Bench-Supported Pullover", "Seated Cable Row", "Lats"]) {
+      expect(lats.match.test(name), name).toBe(true);
+    }
+  });
+
+  it("keeps lateral delt work last in the order", async () => {
+    // RULES: REDUCTION | order_last — priority muscle, cut only if it deteriorates.
+    const { REDUCTION_ORDER } = await import("@shared/program-rules");
+    expect(REDUCTION_ORDER[REDUCTION_ORDER.length - 1].target).toContain("Lateral delt");
+  });
+});

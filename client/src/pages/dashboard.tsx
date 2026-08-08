@@ -4,18 +4,18 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getCurrentWeek, getDaysUntilShow, getCurrentPhase, getPhaseColor, getDayName, getDayFocus, isDeloadWeek } from "@/lib/utils";
+import { getCurrentWeek, getDaysUntilShow, getCurrentPhase, getPhaseColor, getDayName, getDayFocus } from "@/lib/utils";
 import { Calendar, Dumbbell, CheckCircle2, Circle, TrendingUp, AlertTriangle, Scale, Check, X, Activity, Wind, Plus, Flame } from "lucide-react";
 import type { WorkoutLog, WeeklyCheckIn, Recommendation, CardioSession, VacuumSession, User } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { usePrep } from "@/hooks/use-prep";
+import { FatigueStatus } from "@/components/FatigueStatus";
 
 export default function Dashboard() {
   const { toast } = useToast();
   const { currentWeek, daysUntilShow } = usePrep();
   const phase = getCurrentPhase(currentWeek);
-  const isDeload = isDeloadWeek(currentWeek);
 
   const { data: user } = useQuery<User | null>({ queryKey: ["/api/user"] });
   const activeProgram = user?.activeProgram || 'phase2';
@@ -116,20 +116,13 @@ export default function Dashboard() {
           </Card>
         </div>
 
-        {/* Deload Banner */}
-        {isDeload && (
-          <Card className="border-warning bg-warning/10" data-testid="banner-deload">
-            <CardContent className="p-4 flex items-center gap-3">
-              <AlertTriangle className="w-5 h-5 text-warning" />
-              <div>
-                <div className="font-semibold text-warning">DELOAD WEEK</div>
-                <div className="text-sm text-muted-foreground">
-                  Reduce volume by 40%. Drop 1-2 sets per exercise. Maintain current weights.
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+        {/*
+          Fatigue status, from the program's own two-tier deload triggers.
+          This replaced a banner driven purely by the week number — which fired
+          on a schedule the RULES sheet does not contain, and could not tell you
+          why.
+        */}
+        <FatigueStatus />
 
         {/* This Week's Workouts */}
         <div>

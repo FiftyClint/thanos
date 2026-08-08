@@ -279,6 +279,43 @@ npm run db:seed:dry     # reports  +inserted  ~updated  -removed
 npm run db:seed
 ```
 
+### Deloads are fatigue-triggered, not scheduled
+
+The program's RULES sheet prescribes no calendar deload. Deloads there fire off
+signals you produce, in two tiers, and the app implements them directly
+(`server/lib/fatigue.ts`, rules transcribed in `shared/program-rules.ts`).
+
+**Tier 1 — trim sets, local.** A primary stalling at the same load for two
+consecutive sessions, pump/MMC gone for two, or one joint achy for two. Pull
+2–4 sets from that muscle only, following the sheet's reduction order — which
+puts lateral delt work last, because it is this block's priority muscle.
+
+**Tier 2 — full deload.** Two or more primaries regressing for two sessions,
+RIR inflating across lifts, joint pain in a working set or two joints achy,
+warm-ups feeling heavy for two sessions, dread on three or more days, or a
+Tier 1 trim that failed. Volume drops to 45% of normal, RIR 4–5 on every set,
+no failure.
+
+**The confound check.** The sheet is explicit that ordinary cut drift is not a
+deload: gradual, isolated, no joint signal. So a Tier 2 trigger with no joint
+and no motivation signal is held at *monitor* rather than calling a deload —
+declining numbers in a deficit are expected.
+
+**Hard stops** are separate and outrank any deload verdict: joint pain that
+changes form, same-side shoulder pain across both pressing and lateral days.
+
+Nothing applies itself. The assessment returns its verdict **with the evidence
+that produced it**, and you decide — the confound check is a judgment call, and
+`RAMP | activation | MANUAL ONLY` sets the precedent. Starting a deload records
+the triggers as they stood, so the decision stays auditable later.
+
+Four inputs feed this, collected at the end of each session (all optional):
+joint status and which joints, whether warm-ups felt heavy, pump quality, and
+whether you dreaded the session. Skipping one doesn't block the save — the
+assessment reports that trigger as *unevaluated* rather than quietly treating
+it as clear. Resting HR is the one hard stop the app cannot check, and it says
+so rather than pretending otherwise.
+
 ### Weight recommendations
 
 Before you touch a weight box, the app fills it in, in this order of precedence:

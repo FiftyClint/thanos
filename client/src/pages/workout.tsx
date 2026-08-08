@@ -14,6 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient, wasQueued } from "@/lib/queryClient";
 import { getCurrentWeek, getCurrentPhase, getDayName, getDayFocus, formatTime, parseRestSeconds, isDeloadWeek } from "@/lib/utils";
 import { usePrep } from "@/hooks/use-prep";
+import { SessionCheck, EMPTY_SESSION_CHECK, type SessionCheckValue } from "@/components/SessionCheck";
 import ProgramSelector from "@/components/ProgramSelector";
 import { ChevronDown, ChevronUp, Play, Clock, Timer, AlertTriangle, CheckCircle2, X, Pause, RotateCcw, Download, Plus, ArrowLeftRight } from "lucide-react";
 import type { Exercise, SetLog, WorkoutLog, User } from "@shared/schema";
@@ -146,6 +147,7 @@ export default function Workout() {
   const [expandedExercises, setExpandedExercises] = useState<Set<string>>(new Set());
   const [exerciseData, setExerciseData] = useState<Map<string, SetData[]>>(new Map());
   const [sessionNotes, setSessionNotes] = useState("");
+  const [sessionCheck, setSessionCheck] = useState<SessionCheckValue>(EMPTY_SESSION_CHECK);
   const [sessionStartTime, setSessionStartTime] = useState<Date | null>(null);
   const [elapsedTime, setElapsedTime] = useState(0);
   
@@ -379,6 +381,7 @@ export default function Workout() {
         program: activeProgram,
         duration: elapsedTime ? Math.floor(elapsedTime / 60) : undefined,
         notes: sessionNotes,
+        ...sessionCheck,
         sets: Array.from(exerciseData.entries()).flatMap(([exerciseId, sets]) =>
           sets.filter((s) => s.completed).map((s) => ({
             exerciseId,
@@ -1095,6 +1098,10 @@ export default function Workout() {
             </div>
           </Collapsible>
         )}
+
+        {/* Fatigue inputs — feed the deload triggers. Placed before notes so
+            they're answered while the session is still fresh. */}
+        <SessionCheck value={sessionCheck} onChange={setSessionCheck} />
 
         {/* Session Notes */}
         <Card>

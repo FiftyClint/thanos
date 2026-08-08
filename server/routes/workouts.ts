@@ -12,7 +12,8 @@ import { storage } from "../storage";
 import { logger } from "../logger";
 import { requireAuth, userIdOf } from "../middleware/auth";
 import { asyncHandler, notFound } from "../middleware/error";
-import { getCurrentPhase, applyProgramRules, setsForWeek, isUnilateralInputType } from "../lib/program";
+import { getCurrentPhase, applyProgramRules, isUnilateralInputType } from "../lib/program";
+import { setsForDeload } from "@shared/program-rules";
 import { getRecommendedWeightsForExercise } from "../lib/autofill";
 import { analyseExercisePerformance, groupSetsByExercise } from "../lib/progressionAnalysis";
 import { syncTrainingSession } from "../integrations/notion";
@@ -86,7 +87,8 @@ workoutRouter.post(
   "/workouts/complete",
   requireAuth,
   asyncHandler(async (req, res) => {
-    const { day, week, phase, program, duration, notes, sets } = workoutCompleteSchema.parse(req.body);
+    const { day, week, phase, program, duration, notes, sets, jointStatus, jointAreas, warmupFeel, pumpQuality, sessionDread } =
+      workoutCompleteSchema.parse(req.body);
     const userId = userIdOf(req);
     const resolvedProgram = program ?? (await activeProgram(userId));
 
@@ -108,6 +110,11 @@ workoutRouter.post(
         program: resolvedProgram,
         duration: duration ?? workoutLog.duration,
         notes: notes ?? workoutLog.notes,
+        jointStatus: jointStatus ?? workoutLog.jointStatus,
+        jointAreas: jointAreas ?? workoutLog.jointAreas,
+        warmupFeel: warmupFeel ?? workoutLog.warmupFeel,
+        pumpQuality: pumpQuality ?? workoutLog.pumpQuality,
+        sessionDread: sessionDread ?? workoutLog.sessionDread,
       });
       // Re-submitting a session replaces its sets instead of appending a second
       // copy, which is what happened before when a save was retried.
@@ -123,6 +130,11 @@ workoutRouter.post(
         duration: duration ?? null,
         notes: notes ?? "",
         completed: true,
+        jointStatus: jointStatus ?? null,
+        jointAreas: jointAreas ?? [],
+        warmupFeel: warmupFeel ?? null,
+        pumpQuality: pumpQuality ?? null,
+        sessionDread: sessionDread ?? null,
       });
     }
 
@@ -216,12 +228,23 @@ workoutRouter.get(
     const program = await activeProgram(userId);
     const exercises = applyProgramRules(await storage.getExercisesByDay(day, program), program, week);
 
+    /*
+     * Volume follows an ACTIVE deload event, not the calendar.
+     *
+     * The deload used to be a function of the week number; the program's RULES
+     * sheet has no calendar deload at all, only fatigue-triggered ones the
+     * athlete activates. RULES: DELOAD_T2 | week_sets — 40-50% of normal.
+     */
+    const deload = await storage.getActiveDeload(userId);
+    const onFullDeload = deload?.tier === 2;
+
     const result: Record<string, unknown[]> = {};
     for (const exercise of exercises) {
+      const numSets = onFullDeload ? setsForDeload(exercise.defaultSets) : exercise.defaultSets;
       result[exercise.id] = await getRecommendedWeightsForExercise(
         userId,
         exercise.id,
-        setsForWeek(exercise.defaultSets, week),
+        numSets,
         week,
         isUnilateralInputType(exercise.inputType),
       );

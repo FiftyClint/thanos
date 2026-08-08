@@ -9,7 +9,8 @@ import {
   type CardioSession, type InsertCardioSession,
   type VacuumSession, type InsertVacuumSession,
   users, exercises, workoutLogs, setLogs, weeklyCheckIns, progressPhotos, recommendations,
-  cardioSessions, vacuumSessions,
+  cardioSessions, vacuumSessions, deloadEvents,
+  type DeloadEvent, type InsertDeloadEvent,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, gte, lte, desc, asc, inArray, sql } from "drizzle-orm";
@@ -76,6 +77,14 @@ export interface IStorage {
   getVacuumSessionsByDate(userId: string, date: Date): Promise<VacuumSession[]>;
   createVacuumSession(session: InsertVacuumSession): Promise<VacuumSession>;
   deleteVacuumSession(id: string): Promise<void>;
+
+  // Deload events
+  getDeloadEvents(userId: string): Promise<DeloadEvent[]>;
+  getDeloadEvent(id: string): Promise<DeloadEvent | undefined>;
+  getActiveDeload(userId: string): Promise<DeloadEvent | undefined>;
+  getLatestActionedTier1(userId: string): Promise<DeloadEvent | undefined>;
+  createDeloadEvent(event: InsertDeloadEvent): Promise<DeloadEvent>;
+  updateDeloadEvent(id: string, updates: Partial<DeloadEvent>): Promise<DeloadEvent>;
 }
 
 function startOfDay(date: Date): Date {
@@ -437,6 +446,66 @@ export class DatabaseStorage implements IStorage {
 
   async deleteVacuumSession(id: string): Promise<void> {
     await db.delete(vacuumSessions).where(eq(vacuumSessions.id, id));
+  }
+
+  // ── Deload events ────────────────────────────────────────────────────────
+  async getDeloadEvents(userId: string): Promise<DeloadEvent[]> {
+    return db
+      .select()
+      .from(deloadEvents)
+      .where(eq(deloadEvents.userId, userId))
+      .orderBy(desc(deloadEvents.recommendedAt));
+  }
+
+  async getDeloadEvent(id: string): Promise<DeloadEvent | undefined> {
+    const [event] = await db.select().from(deloadEvents).where(eq(deloadEvents.id, id)).limit(1);
+    return event;
+  }
+
+  async getActiveDeload(userId: string): Promise<DeloadEvent | undefined> {
+    const [event] = await db
+      .select()
+      .from(deloadEvents)
+      .where(and(eq(deloadEvents.userId, userId), eq(deloadEvents.status, "active")))
+      .orderBy(desc(deloadEvents.startedAt))
+      .limit(1);
+    return event;
+  }
+
+  /**
+   * The most recent Tier 1 trim that was actually actioned.
+   *
+   * Feeds the "Tier 1 failed" escalation: a trim that was run and did not
+   * resolve the signal is itself a Tier 2 trigger.
+   */
+  async getLatestActionedTier1(userId: string): Promise<DeloadEvent | undefined> {
+    const [event] = await db
+      .select()
+      .from(deloadEvents)
+      .where(
+        and(
+          eq(deloadEvents.userId, userId),
+          eq(deloadEvents.tier, 1),
+          inArray(deloadEvents.status, ["active", "completed"]),
+        ),
+      )
+      .orderBy(desc(deloadEvents.startedAt))
+      .limit(1);
+    return event;
+  }
+
+  async createDeloadEvent(event: InsertDeloadEvent): Promise<DeloadEvent> {
+    const [created] = await db.insert(deloadEvents).values(event).returning();
+    return created;
+  }
+
+  async updateDeloadEvent(id: string, updates: Partial<DeloadEvent>): Promise<DeloadEvent> {
+    const [updated] = await db
+      .update(deloadEvents)
+      .set(updates)
+      .where(eq(deloadEvents.id, id))
+      .returning();
+    return updated;
   }
 }
 

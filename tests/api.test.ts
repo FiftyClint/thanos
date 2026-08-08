@@ -12,6 +12,7 @@ import {
   firstWorkingExerciseId,
   firstLoadedExerciseId,
   firstUnilateralExerciseId,
+  primaryExerciseId,
   type TestUser,
 } from "./helpers/db";
 
@@ -511,6 +512,150 @@ suite("API", () => {
       const photos = await user.agent.get("/api/photos").expect(200);
       expect(photos.body).toHaveLength(1);
       expect(photos.body[0].filePath).toBe(objectPath);
+    });
+  });
+
+
+  describe("fatigue and deloads", () => {
+    /** Log a session on `day` with a given primary-lift performance. */
+    async function logSession(
+      user: TestUser,
+      opts: { day: number; week: number; load: number; reps: number; rir?: number; check?: Record<string, unknown> },
+    ) {
+      // Must be the day's primary — that is what the stall trigger watches.
+      const exerciseId = await primaryExerciseId(app, user, opts.day);
+      await user.agent
+        .post("/api/workouts/complete")
+        .send({
+          day: opts.day,
+          week: opts.week,
+          sets: [
+            { exerciseId, setNumber: 1, weightLbs: opts.load, reps: opts.reps, rirActual: opts.rir ?? 2 },
+          ],
+          ...(opts.check ?? {}),
+        })
+        .expect(200);
+      return exerciseId;
+    }
+
+    it("is clear with no sessions, and says so", async () => {
+      const user = await createUser(app);
+      const res = await user.agent.get("/api/fatigue").expect(200);
+      expect(res.body.verdict).toBe("clear");
+      expect(res.body.sessionsConsidered).toBe(0);
+    });
+
+    it("reports which signals it could not evaluate", async () => {
+      const user = await createUser(app);
+      await logSession(user, { day: 1, week: 1, load: 100, reps: 10 });
+
+      const res = await user.agent.get("/api/fatigue").expect(200);
+      const notes = res.body.unevaluated.join(" ");
+      expect(notes).toContain("Joint status");
+      expect(notes).toContain("Resting HR");
+    });
+
+    it("stores the session check inputs with the workout", async () => {
+      const user = await createUser(app);
+      await logSession(user, {
+        day: 1,
+        week: 1,
+        load: 100,
+        reps: 10,
+        check: { jointStatus: "achy", jointAreas: ["right elbow"], warmupFeel: "heavy", sessionDread: true },
+      });
+
+      const history = await user.agent.get("/api/workouts/history").expect(200);
+      expect(history.body[0].jointStatus).toBe("achy");
+      expect(history.body[0].jointAreas).toEqual(["right elbow"]);
+      expect(history.body[0].warmupFeel).toBe("heavy");
+      expect(history.body[0].sessionDread).toBe(true);
+    });
+
+    it("raises a hard stop on joint pain", async () => {
+      const user = await createUser(app);
+      await logSession(user, {
+        day: 1,
+        week: 1,
+        load: 100,
+        reps: 10,
+        check: { jointStatus: "painful", jointAreas: ["left knee"] },
+      });
+
+      const res = await user.agent.get("/api/fatigue").expect(200);
+      expect(res.body.verdict).toBe("hard_stop");
+      expect(res.body.hardStops.join(" ")).toContain("joint pain");
+    });
+
+    it("detects a stalling primary across three sessions", async () => {
+      const user = await createUser(app);
+      // Same load, falling reps — RULES: DELOAD_T1 primary stall.
+      await logSession(user, { day: 1, week: 1, load: 100, reps: 12 });
+      await logSession(user, { day: 1, week: 2, load: 100, reps: 10 });
+      await logSession(user, { day: 1, week: 3, load: 100, reps: 8 });
+
+      const res = await user.agent.get("/api/fatigue").expect(200);
+      expect(res.body.verdict).toBe("tier_1");
+      expect(res.body.triggers.map((t: { id: string }) => t.id)).toContain("primary_stall");
+      expect(res.body.reductionPlan.length).toBeGreaterThan(0);
+    });
+
+    it("stays clear while the primary is still progressing", async () => {
+      const user = await createUser(app);
+      await logSession(user, { day: 1, week: 1, load: 100, reps: 8 });
+      await logSession(user, { day: 1, week: 2, load: 105, reps: 9 });
+      await logSession(user, { day: 1, week: 3, load: 110, reps: 10 });
+
+      const res = await user.agent.get("/api/fatigue").expect(200);
+      expect(res.body.verdict).toBe("clear");
+    });
+
+    it("starts a deload, and applies its volume to recommendations", async () => {
+      const user = await createUser(app);
+      await logSession(user, { day: 1, week: 1, load: 100, reps: 10 });
+
+      const before = await user.agent.get("/api/sets/recommendations/1?week=2").expect(200);
+      const setsBefore = Object.values(before.body).map((r) => (r as unknown[]).length);
+
+      await user.agent.post("/api/deloads").send({ tier: 2, week: 2 }).expect(201);
+
+      const after = await user.agent.get("/api/sets/recommendations/1?week=2").expect(200);
+      const setsAfter = Object.values(after.body).map((r) => (r as unknown[]).length);
+
+      // RULES: DELOAD_T2 | week_sets — 40-50% of normal.
+      const totalBefore = setsBefore.reduce((a, b) => a + b, 0);
+      const totalAfter = setsAfter.reduce((a, b) => a + b, 0);
+      expect(totalAfter).toBeLessThan(totalBefore);
+    });
+
+    it("refuses a second concurrent deload", async () => {
+      const user = await createUser(app);
+      await user.agent.post("/api/deloads").send({ tier: 2, week: 3 }).expect(201);
+      await user.agent.post("/api/deloads").send({ tier: 2, week: 3 }).expect(400);
+    });
+
+    it("clears the active deload once completed, restoring volume", async () => {
+      const user = await createUser(app);
+      await logSession(user, { day: 1, week: 1, load: 100, reps: 10 });
+
+      const created = await user.agent.post("/api/deloads").send({ tier: 2, week: 2 }).expect(201);
+      const deloaded = await user.agent.get("/api/sets/recommendations/1?week=2").expect(200);
+
+      await user.agent.patch(`/api/deloads/${created.body.id}`).send({ status: "completed" }).expect(200);
+      const restored = await user.agent.get("/api/sets/recommendations/1?week=2").expect(200);
+
+      const count = (body: object) => Object.values(body).reduce((n, r) => n + (r as unknown[]).length, 0);
+      expect(count(restored.body)).toBeGreaterThan(count(deloaded.body));
+      expect((await user.agent.get("/api/fatigue").expect(200)).body.activeDeload).toBeNull();
+    });
+
+    it("keeps one athlete's deloads away from another", async () => {
+      const a = await createUser(app);
+      const b = await createUser(app);
+
+      const created = await a.agent.post("/api/deloads").send({ tier: 1, week: 2 }).expect(201);
+      await b.agent.patch(`/api/deloads/${created.body.id}`).send({ status: "completed" }).expect(404);
+      expect((await b.agent.get("/api/deloads").expect(200)).body).toHaveLength(0);
     });
   });
 

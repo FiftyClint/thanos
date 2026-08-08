@@ -81,3 +81,20 @@ export async function firstUnilateralExerciseId(app: Express, user: TestUser, da
   if (!loaded) throw new Error(`no unilateral exercise seeded for day ${day}`);
   return loaded.id;
 }
+
+/**
+ * The day's primary lift, resolved the way the server does.
+ *
+ * RULES: vacuum_position — Stomach Vacuum is always row 1 of working sets and
+ * is not counted as volume, so the primary is the first working exercise after
+ * it by order. Tests that exercise the fatigue triggers must log against THIS
+ * exercise, or `primary` comes back null and nothing fires.
+ */
+export async function primaryExerciseId(app: Express, user: TestUser, day = 1): Promise<string> {
+  const res = await user.agent.get(`/api/exercises/${day}?week=1`).expect(200);
+  const working = (res.body as Array<{ id: string; name: string; segment: string; order: number }>)
+    .filter((e) => e.segment === "working" && !/stomach vacuum/i.test(e.name))
+    .sort((a, b) => a.order - b.order);
+  if (working.length === 0) throw new Error(`no working exercise for day ${day}`);
+  return working[0].id;
+}

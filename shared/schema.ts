@@ -13,6 +13,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
+import { JOINT_STATUSES, WARMUP_FEELS, PUMP_QUALITIES } from "./program-rules";
 
 export const PROGRAMS = ["phase1", "phase2", "phase3"] as const;
 export const SEGMENTS = ["warmup", "working", "finisher", "cooldown"] as const;
@@ -106,6 +107,22 @@ export const workoutLogs = pgTable(
     duration: integer("duration"), // minutes
     notes: text("notes").default(""),
     completed: boolean("completed").default(false),
+
+    /*
+     * Fatigue inputs, per RULES: STANDING | tracked_inputs — "Every session:
+     * load x reps on the day's primary | actual RIR on its last set | AM fasted
+     * weight | joint status (clean/achy/painful)".
+     *
+     * Load, reps and RIR come from set_logs. These four are what the deload
+     * triggers need and the app had no way to record, which is why the deload
+     * was a calendar instead.
+     */
+    jointStatus: text("joint_status"), // "clean" | "achy" | "painful"
+    jointAreas: text("joint_areas").array().default([]),
+    warmupFeel: text("warmup_feel"), // "normal" | "heavy"
+    pumpQuality: text("pump_quality"), // "good" | "normal" | "absent"
+    sessionDread: boolean("session_dread"),
+
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => ({
@@ -275,6 +292,39 @@ export const vacuumSessions = pgTable(
   }),
 );
 
+// ── Deload events ───────────────────────────────────────────────────────────
+/**
+ * A deload the athlete was recommended, and what they decided.
+ *
+ * Deloads are fatigue-triggered (RULES: DELOAD_T1 / DELOAD_T2), so they are
+ * events with a start and an end — not a property of the calendar. Recording
+ * the decision is what makes "Tier 1 failed" and the RETURN protocol
+ * evaluable at all.
+ */
+export const deloadEvents = pgTable(
+  "deload_events",
+  {
+    id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+    userId: varchar("user_id", { length: 36 })
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tier: integer("tier").notNull(), // 1 = trim sets, 2 = full deload
+    status: text("status").notNull().default("recommended"),
+    /** Which muscle or lift a Tier 1 trim applies to. */
+    subject: text("subject"),
+    /** The triggers that fired, with their evidence, as recorded at the time. */
+    triggers: jsonb("triggers").default([]),
+    week: integer("week").notNull(),
+    recommendedAt: timestamp("recommended_at").defaultNow().notNull(),
+    startedAt: timestamp("started_at"),
+    endedAt: timestamp("ended_at"),
+    notes: text("notes").default(""),
+  },
+  (table) => ({
+    userStatusIdx: index("deload_events_user_status_idx").on(table.userId, table.status),
+  }),
+);
+
 // ── Session store (connect-pg-simple) ───────────────────────────────────────
 export const sessions = pgTable(
   "session",
@@ -297,6 +347,7 @@ export const insertWeeklyCheckInSchema = createInsertSchema(weeklyCheckIns).omit
 export const insertProgressPhotoSchema = createInsertSchema(progressPhotos).omit({ id: true, date: true });
 export const insertRecommendationSchema = createInsertSchema(recommendations).omit({ id: true, createdAt: true });
 export const insertCardioSessionSchema = createInsertSchema(cardioSessions).omit({ id: true, createdAt: true });
+export const insertDeloadEventSchema = createInsertSchema(deloadEvents).omit({ id: true, recommendedAt: true });
 export const insertVacuumSessionSchema = createInsertSchema(vacuumSessions).omit({ id: true, createdAt: true });
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -317,6 +368,8 @@ export type InsertCardioSession = z.infer<typeof insertCardioSessionSchema>;
 export type CardioSession = typeof cardioSessions.$inferSelect;
 export type InsertVacuumSession = z.infer<typeof insertVacuumSessionSchema>;
 export type VacuumSession = typeof vacuumSessions.$inferSelect;
+export type InsertDeloadEvent = z.infer<typeof insertDeloadEventSchema>;
+export type DeloadEvent = typeof deloadEvents.$inferSelect;
 
 /** The user object the API returns — never includes the password hash. */
 export type PublicUser = Omit<User, "passwordHash">;
@@ -355,6 +408,15 @@ export const workoutCompleteSchema = z.object({
   program: z.enum(PROGRAMS).optional(),
   duration: z.number().int().min(0).max(600).optional(),
   notes: z.string().max(5000).optional(),
+
+  // Fatigue inputs. All optional: a session logged without them still saves,
+  // and the assessment reports which triggers it therefore could not evaluate.
+  jointStatus: z.enum(JOINT_STATUSES).nullable().optional(),
+  jointAreas: z.array(z.string().max(40)).max(12).optional(),
+  warmupFeel: z.enum(WARMUP_FEELS).nullable().optional(),
+  pumpQuality: z.enum(PUMP_QUALITIES).nullable().optional(),
+  sessionDread: z.boolean().nullable().optional(),
+
   sets: z
     .array(
       z.object({
@@ -463,3 +525,15 @@ export const listQuerySchema = z.object({
 
 export const weekParamSchema = z.object({ week: week.default(1) });
 export const dayParamSchema = z.object({ day: trainingDay });
+
+export const deloadDecisionSchema = z.object({
+  status: z.enum(["active", "completed", "dismissed"]),
+  notes: z.string().max(2000).optional(),
+});
+
+export const startDeloadSchema = z.object({
+  tier: z.union([z.literal(1), z.literal(2)]),
+  subject: z.string().max(120).nullable().optional(),
+  week,
+  notes: z.string().max(2000).optional(),
+});

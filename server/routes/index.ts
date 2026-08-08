@@ -5,6 +5,7 @@ import { checkInRouter } from "./checkins";
 import { conditioningRouter } from "./conditioning";
 import { exportRouter } from "./exports";
 import { uploadRouter } from "./uploads";
+import { fatigueRouter } from "./fatigue";
 
 /** Everything mounted under /api. */
 export const apiRouter = Router();
@@ -20,5 +21,6 @@ apiRouter.use(checkInRouter);
 apiRouter.use(conditioningRouter);
 apiRouter.use(exportRouter);
 apiRouter.use(uploadRouter);
+apiRouter.use(fatigueRouter);
 
 export { objectRouter } from "./uploads";
