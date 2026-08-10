@@ -2,7 +2,7 @@
   "name": "thanos-program",
   "version": "2.0.0",
   "private": true,
-  "description": "Competition prep training tracker \u2014 36-week periodized program, workout logging, check-ins, progress photos.",
+  "description": "Competition prep training tracker — 36-week periodized program, workout logging, check-ins, progress photos.",
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -100,6 +100,9 @@
   "devDependencies": {
     "@eslint/js": "^9.39.5",
     "@tailwindcss/typography": "^0.5.15",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.3",
     "@types/bcryptjs": "^2.4.6",
     "@types/compression": "^1.7.5",
     "@types/connect-pg-simple": "^7.0.3",
@@ -119,6 +122,7 @@
     "esbuild": "^0.24.2",
     "eslint": "^9.17.0",
     "eslint-plugin-react-hooks": "^5.1.0",
+    "jsdom": "^30.0.1",
     "pino-pretty": "^13.0.0",
     "postcss": "^8.4.49",
     "prettier": "^3.4.2",

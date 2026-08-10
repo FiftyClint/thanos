@@ -19,6 +19,101 @@ import ProgramSelector from "@/components/ProgramSelector";
 import { ChevronDown, ChevronUp, Play, Clock, Timer, AlertTriangle, CheckCircle2, X, Pause, RotateCcw, Download, Plus, ArrowLeftRight } from "lucide-react";
 import type { Exercise, SetLog, WorkoutLog, User } from "@shared/schema";
 
+const BAND_COLORS = ["Orange", "Red", "Purple", "Green", "Blue"];
+
+/**
+ * One side (L or R) of a unilateral set.
+ *
+ * Declared at module scope, and that placement is the whole point. This lived
+ * inside the .map() callback that renders the rows, so every render produced a
+ * new component identity — React treats that as a different component type and
+ * remounts the subtree rather than updating it. The <input> was destroyed and
+ * rebuilt on each keystroke, so focus was lost, the on-screen keyboard closed,
+ * and unilateral exercises could not be typed into at all.
+ *
+ * Covered by tests/workout-inputs.test.tsx.
+ */
+function UnilateralSideRow({
+  set,
+  idx,
+  label,
+  exerciseId,
+  isWeight,
+  isWeightDb,
+  isBand,
+  updateSet,
+}: {
+  set: SetData | undefined;
+  idx: number;
+  label: string;
+  exerciseId: string;
+  isWeight: boolean;
+  isWeightDb: boolean;
+  isBand: boolean;
+  updateSet: (exerciseId: string, setIndex: number, field: keyof SetData, value: any) => void;
+}) {
+  // findIndex gives -1 when this side has no row. Writing to sets[-1] would
+  // throw, so show the gap instead of offering an input that cannot save.
+  const missing = idx < 0;
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="text-xs font-bold text-muted-foreground w-3 shrink-0">{label}</span>
+
+      {missing ? (
+        <span className="text-xs text-muted-foreground italic">side not set up</span>
+      ) : (
+        <>
+          {isWeight && (
+            <div className="flex flex-col">
+              <Input
+                type="number"
+                inputMode="decimal"
+                placeholder={isWeightDb ? "Lbs/Db" : "Lbs"}
+                className="h-10 text-base w-16"
+                value={set?.weightLbs ?? ""}
+                onChange={(e) =>
+                  updateSet(exerciseId, idx, "weightLbs", e.target.value === "" ? undefined : parseFloat(e.target.value))
+                }
+                data-testid={`input-weight-${idx}`}
+              />
+              <WeightSourceLabel source={set?.weightSource} weight={set?.weightLbs} />
+            </div>
+          )}
+
+          {isBand && (
+            <Select
+              value={set?.bandNote || ""}
+              onValueChange={(value) => updateSet(exerciseId, idx, "bandNote", value)}
+            >
+              <SelectTrigger className="h-10 w-20" data-testid={`select-band-${idx}`}>
+                <SelectValue placeholder="Band" />
+              </SelectTrigger>
+              <SelectContent>
+                {BAND_COLORS.map((color) => (
+                  <SelectItem key={color} value={color}>{color}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+
+          <Input
+            type="number"
+            inputMode="numeric"
+            placeholder={set?.recommendedReps ? `${set.recommendedReps}` : "Reps"}
+            className="h-10 text-base w-14"
+            value={set?.reps ?? ""}
+            onChange={(e) =>
+              updateSet(exerciseId, idx, "reps", e.target.value === "" ? undefined : parseInt(e.target.value, 10))
+            }
+            data-testid={`input-reps-${idx}`}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
 function TimedSetRow({
   set,
   idx,
@@ -114,7 +209,7 @@ function TimedSetRow({
 
 type WeightSource = "accepted_recommendation" | "pending_recommendation" | "last_session" | "auto_reduce" | "no_history" | "deload" | "user_edited";
 
-interface SetData {
+export interface SetData {
   setNumber: number;
   side?: string;
   weightLbs?: number;
@@ -301,6 +396,11 @@ export default function Workout() {
       const newData = new Map(prev);
       const sets = [...(newData.get(exerciseId) || [])];
       const currentSet = sets[setIndex];
+
+      // setIndex can be -1 when a row is looked up by findIndex and the side
+      // is missing. Reading currentSet.recommendedWeight below would throw and
+      // take the whole workout screen down mid-session.
+      if (!currentSet) return prev;
       
       // Track if user edited the weight differently from the recommendation
       if (field === "weightLbs" && currentSet.recommendedWeight !== undefined) {
@@ -1158,7 +1258,7 @@ function WeightSourceLabel({ source, weight }: { source?: WeightSource; weight?:
   );
 }
 
-function renderSetInputs(
+export function renderSetInputs(
   exercise: Exercise,
   sets: SetData[],
   updateSet: (exerciseId: string, setIndex: number, field: keyof SetData, value: any) => void,
@@ -1216,7 +1316,6 @@ function renderSetInputs(
     const isWeight = inputType === "weight_reps_unilateral" || inputType === "weight_reps_unilateral_db";
     const isWeightDb = inputType === "weight_reps_unilateral_db";
     const isBand = inputType === "reps_unilateral_band";
-    const bandColors = ["Orange", "Red", "Purple", "Green", "Blue"];
 
     // Group L+R entries by setNumber → one row per set (4 sets = 4 rows, not 8)
     const setNumbers = Array.from(new Set(sets.map((s) => s.setNumber))).sort((a, b) => a - b);
@@ -1230,61 +1329,39 @@ function renderSetInputs(
           const rightSet = sets[rightIdx];
           const pairComplete = !!(leftSet?.completed && rightSet?.completed);
 
-          const SideRow = ({ set, idx, label }: { set: SetData | undefined; idx: number; label: string }) => (
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs font-bold text-muted-foreground w-3 shrink-0">{label}</span>
-              {isWeight && (
-                <div className="flex flex-col">
-                  <Input
-                    type="number"
-                    inputMode="decimal"
-                    placeholder={isWeightDb ? "Lbs/Db" : "Lbs"}
-                    className="h-10 text-base w-16"
-                    value={set?.weightLbs || ""}
-                    onChange={(e) => updateSet(exerciseId, idx, "weightLbs", parseFloat(e.target.value || "0"))}
-                    data-testid={`input-weight-${idx}`}
-                  />
-                  <WeightSourceLabel source={set?.weightSource} weight={set?.weightLbs} />
-                </div>
-              )}
-              {isBand && (
-                <Select
-                  value={set?.bandNote || ""}
-                  onValueChange={(value) => updateSet(exerciseId, idx, "bandNote", value)}
-                >
-                  <SelectTrigger className="h-10 w-20" data-testid={`select-band-${idx}`}>
-                    <SelectValue placeholder="Band" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {bandColors.map((color) => (
-                      <SelectItem key={color} value={color}>{color}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-              <Input
-                type="number"
-                inputMode="numeric"
-                placeholder={set?.recommendedReps ? `${set.recommendedReps}` : "Reps"}
-                className="h-10 text-base w-14"
-                value={set?.reps || ""}
-                onChange={(e) => updateSet(exerciseId, idx, "reps", parseInt(e.target.value || "0", 10))}
-                data-testid={`input-reps-${idx}`}
-              />
-            </div>
-          );
-
           return (
             <div key={setNum} className="bg-card-alt p-2 rounded-md">
               <div className="flex items-center gap-2">
                 <span className="w-6 text-center font-medium text-sm shrink-0">{setNum}</span>
                 <div className="flex-1 space-y-1.5">
-                  <SideRow set={leftSet} idx={leftIdx} label="L" />
-                  <SideRow set={rightSet} idx={rightIdx} label="R" />
+                  <UnilateralSideRow
+                    set={leftSet}
+                    idx={leftIdx}
+                    label="L"
+                    exerciseId={exerciseId}
+                    isWeight={isWeight}
+                    isWeightDb={isWeightDb}
+                    isBand={isBand}
+                    updateSet={updateSet}
+                  />
+                  <UnilateralSideRow
+                    set={rightSet}
+                    idx={rightIdx}
+                    label="R"
+                    exerciseId={exerciseId}
+                    isWeight={isWeight}
+                    isWeightDb={isWeightDb}
+                    isBand={isBand}
+                    updateSet={updateSet}
+                  />
                 </div>
                 <Checkbox
                   checked={pairComplete}
+                  disabled={leftIdx < 0 || rightIdx < 0}
                   onCheckedChange={() => {
+                    // Both sides must exist: these indexes come from findIndex,
+                    // which returns -1 when a side is missing.
+                    if (leftIdx < 0 || rightIdx < 0) return;
                     // Mark right side complete directly, then handleSetComplete marks left + starts timer
                     updateSet(exerciseId, rightIdx, "completed", true);
                     handleSetComplete(exercise, leftIdx);
