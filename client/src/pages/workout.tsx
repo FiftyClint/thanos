@@ -229,6 +229,66 @@ interface ExerciseWithSets extends Exercise {
   previousSets?: SetLog[];
 }
 
+/** The shape the server accepts — client-only bookkeeping deliberately absent. */
+export interface SetToSave {
+  exerciseId: string;
+  setNumber: number;
+  side?: string;
+  weightLbs?: number;
+  reps?: number;
+  durationSecs?: number;
+  rirActual?: number;
+  bandNote?: string;
+  cardioNotes?: string;
+}
+
+/**
+ * Did the athlete actually perform this set?
+ *
+ * The weight box is PRE-FILLED from the server's recommendation, so a weight
+ * being present proves nothing — every set of every exercise on the day carries
+ * one before the screen is even touched. Reps, duration, band colour and cardio
+ * notes are never pre-filled, so they are the honest evidence of work done, as
+ * is a weight the user changed away from what was suggested.
+ */
+function wasPerformed(set: SetData): boolean {
+  if (set.completed) return true;
+  if (set.reps !== undefined) return true;
+  if ((set.durationSecs ?? 0) > 0) return true;
+  if (set.bandNote) return true;
+  if (set.cardioNotes) return true;
+  return set.weightSource === "user_edited";
+}
+
+/**
+ * The sets to post when a session is completed.
+ *
+ * This used to be `sets.filter((s) => s.completed)` inline in the mutation —
+ * only ticked sets were sent. Filling in every row by hand and then tapping
+ * "Complete Workout" without also tapping each checkbox saved the session with
+ * no sets at all, and said "Great work! Your session has been saved."
+ *
+ * Nothing surfaced the loss, because the only symptom is an empty weight box
+ * next session — indistinguishable from a first session.
+ *
+ * Covered by tests/workout-save.test.ts.
+ */
+export function collectSetsToSave(exerciseData: Map<string, SetData[]>): SetToSave[] {
+  return Array.from(exerciseData.entries()).flatMap(([exerciseId, sets]) =>
+    sets.filter(wasPerformed).map((s) => ({
+      exerciseId,
+      setNumber: s.setNumber,
+      side: s.side,
+      weightLbs: s.weightLbs,
+      reps: s.reps,
+      durationSecs: s.durationSecs,
+      rirActual: s.rirActual,
+      bandNote: s.bandNote,
+      cardioNotes: s.cardioNotes,
+    })),
+  );
+}
+
 export default function Workout() {
   const params = useParams<{ day: string }>();
   const day = parseInt(params.day || "1", 10);
@@ -245,6 +305,8 @@ export default function Workout() {
   const [sessionCheck, setSessionCheck] = useState<SessionCheckValue>(EMPTY_SESSION_CHECK);
   const [sessionStartTime, setSessionStartTime] = useState<Date | null>(null);
   const [elapsedTime, setElapsedTime] = useState(0);
+  /** Set once the empty-session warning has been shown, so a second tap saves anyway. */
+  const [emptySaveConfirmed, setEmptySaveConfirmed] = useState(false);
   
   // Rest timer state
   const [restTimer, setRestTimer] = useState<{
@@ -472,6 +534,8 @@ export default function Workout() {
     });
   };
 
+  const setsToSave = collectSetsToSave(exerciseData);
+
   const completeWorkoutMutation = useMutation({
     mutationFn: async () => {
       const res = await apiRequest("POST", "/api/workouts/complete", {
@@ -482,12 +546,7 @@ export default function Workout() {
         duration: elapsedTime ? Math.floor(elapsedTime / 60) : undefined,
         notes: sessionNotes,
         ...sessionCheck,
-        sets: Array.from(exerciseData.entries()).flatMap(([exerciseId, sets]) =>
-          sets.filter((s) => s.completed).map((s) => ({
-            exerciseId,
-            ...s,
-          }))
-        ),
+        sets: setsToSave,
       });
       return { queued: wasQueued(res), data: await res.json() };
     },
@@ -496,8 +555,8 @@ export default function Workout() {
       toast({
         title: "Workout Completed",
         description: queued
-          ? "Saved on this device — it'll upload as soon as you're back online."
-          : "Great work! Your session has been saved.",
+          ? `${setsToSave.length} sets saved on this device — they'll upload as soon as you're back online.`
+          : `Great work! ${setsToSave.length} sets saved.`,
       });
       setLocation("/");
     },
@@ -1219,7 +1278,22 @@ export default function Workout() {
         {/* Complete Button */}
         <Button
           className="w-full h-14 text-lg"
-          onClick={() => completeWorkoutMutation.mutate()}
+          onClick={() => {
+            // A session with nothing in it saves no weights, which is what makes
+            // the next session's boxes empty. Say so before it happens rather
+            // than reporting success over an empty save.
+            if (setsToSave.length === 0 && !emptySaveConfirmed) {
+              setEmptySaveConfirmed(true);
+              toast({
+                title: "Nothing logged yet",
+                description:
+                  "Enter reps for the sets you did (or tick them off) so next week's weights carry over. Tap again to finish this session empty.",
+                variant: "destructive",
+              });
+              return;
+            }
+            completeWorkoutMutation.mutate();
+          }}
           disabled={completeWorkoutMutation.isPending}
           data-testid="button-complete-workout"
         >
@@ -1229,6 +1303,9 @@ export default function Workout() {
             <>
               <CheckCircle2 className="w-5 h-5 mr-2" />
               Complete Workout
+              {setsToSave.length > 0 && (
+                <span className="ml-2 text-sm opacity-70">({setsToSave.length} sets)</span>
+              )}
             </>
           )}
         </Button>
