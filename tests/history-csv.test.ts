@@ -5,7 +5,7 @@ import {
   groupIntoSessions,
   resolveExerciseNames,
   type SeedExercise,
-} from "../scripts/lib/history-csv";
+} from "../server/lib/history-csv";
 
 /**
  * Tests for reading the app's exported training history.

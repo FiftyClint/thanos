@@ -1,5 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import ImportHistory from "@/components/ImportHistory";
 import { Download, Dumbbell, ClipboardCheck, TrendingUp, Activity, Wind, FileSpreadsheet } from "lucide-react";
 
 export default function Export() {
@@ -55,6 +56,8 @@ export default function Export() {
           </h1>
           <p className="text-muted-foreground">Download your training data as CSV files</p>
         </div>
+
+        <ImportHistory />
 
         <Card data-testid="card-export-program">
           <CardHeader>

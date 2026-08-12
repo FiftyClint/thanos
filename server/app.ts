@@ -48,7 +48,8 @@ export function buildApp(): Express {
    */
   const jsonParser = express.json({ limit: "1mb" });
   const formParser = express.urlencoded({ extended: false, limit: "1mb" });
-  const RAW_BODY_PATHS = new Set(["/api/uploads/put"]);
+  // POST /api/history/import takes a raw CSV body and parses it in its own route.
+  const RAW_BODY_PATHS = new Set(["/api/uploads/put", "/api/history/import"]);
 
   app.use((req, res, next) => {
     if (RAW_BODY_PATHS.has(req.path)) return next();

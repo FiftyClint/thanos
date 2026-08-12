@@ -6,6 +6,7 @@ import { conditioningRouter } from "./conditioning";
 import { exportRouter } from "./exports";
 import { uploadRouter } from "./uploads";
 import { fatigueRouter } from "./fatigue";
+import { historyImportRouter } from "./history-import";
 
 /** Everything mounted under /api. */
 export const apiRouter = Router();
@@ -22,5 +23,6 @@ apiRouter.use(conditioningRouter);
 apiRouter.use(exportRouter);
 apiRouter.use(uploadRouter);
 apiRouter.use(fatigueRouter);
+apiRouter.use(historyImportRouter);
 
 export { objectRouter } from "./uploads";

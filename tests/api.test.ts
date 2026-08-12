@@ -681,4 +681,112 @@ suite("API", () => {
       expect(res.headers["content-type"]).toContain("application/json");
     });
   });
+
+  describe("history import", () => {
+    const HEADER =
+      "Date,Week,Phase,Day,Exercise#,Exercise,Set,Side,Weight(lbs),Reps,Duration(s),RIR,Band";
+
+    /** A CSV naming a real seeded exercise, so the rows actually resolve. */
+    async function csvFor(user: TestUser, week: number, weight: number): Promise<string> {
+      const exercises = await user.agent.get("/api/exercises/1?week=1").expect(200);
+      const target = exercises.body.find((e: { inputType: string }) => e.inputType === "weight_reps");
+      return [
+        HEADER,
+        `2026-03-0${week},${week},Base,1,${target.number},${target.name},1,,${weight},10,,,`,
+        `2026-03-0${week},${week},Base,1,${target.number},${target.name},2,,${weight},10,,,`,
+      ].join("\n");
+    }
+
+    function post(user: TestUser, csv: string, query = "") {
+      return user.agent
+        .post(`/api/history/import${query}`)
+        .set("Content-Type", "text/csv")
+        .send(csv);
+    }
+
+    it("requires a session", async () => {
+      await request(app).post("/api/history/import").set("Content-Type", "text/csv").send("x").expect(401);
+    });
+
+    it("previews without writing anything", async () => {
+      const user = await createUser(app);
+      const res = await post(user, await csvFor(user, 1, 100), "?dryRun=true").expect(200);
+
+      expect(res.body).toMatchObject({ dryRun: true, sessions: 1, sets: 2, setsWithWeight: 2 });
+      // The preview must not have created the session it described.
+      const workouts = await user.agent.get("/api/workouts").expect(200);
+      expect(workouts.body).toEqual([]);
+    });
+
+    it("imports sessions as completed, so autofill can see them", async () => {
+      const user = await createUser(app);
+      await post(user, await csvFor(user, 1, 100)).expect(200);
+
+      const history = await user.agent.get("/api/workouts/history").expect(200);
+      expect(history.body).toHaveLength(1);
+      expect(history.body[0].completed).toBe(true);
+      expect(history.body[0].sets).toHaveLength(2);
+    });
+
+    it("makes an imported weight the next recommendation", async () => {
+      // The whole point of the feature: history in, suggestion out.
+      const user = await createUser(app);
+      await post(user, await csvFor(user, 1, 135)).expect(200);
+
+      const res = await user.agent.get("/api/sets/recommendations/1?week=2").expect(200);
+      const suggested = Object.values(res.body)
+        .flat()
+        .find((r: unknown) => (r as { weight: number | null }).weight === 135);
+      expect(suggested).toBeTruthy();
+    });
+
+    it("refuses to overwrite existing sessions unless asked", async () => {
+      const user = await createUser(app);
+      const csv = await csvFor(user, 1, 100);
+      await post(user, csv).expect(200);
+
+      const res = await post(user, csv).expect(409);
+      expect(res.body.error).toMatch(/already exist/i);
+    });
+
+    it("replaces rather than duplicating when asked", async () => {
+      const user = await createUser(app);
+      await post(user, await csvFor(user, 1, 100)).expect(200);
+      await post(user, await csvFor(user, 1, 145), "?replace=true").expect(200);
+
+      const history = await user.agent.get("/api/workouts/history").expect(200);
+      expect(history.body).toHaveLength(1);
+      expect(history.body[0].sets).toHaveLength(2);
+      expect(history.body[0].sets[0].weightLbs).toBe(145);
+    });
+
+    it("repairs a row whose exercise name contains a comma", async () => {
+      const user = await createUser(app);
+      const exercises = await user.agent.get("/api/exercises/1?week=1").expect(200);
+      const target = exercises.body.find((e: { inputType: string }) => e.inputType === "weight_reps");
+      // Give the name a comma the way the old export did — unquoted.
+      const csv = [HEADER, `2026-03-01,1,Base,1,${target.number},${target.name},1,,225,8,,,`].join("\n");
+
+      const res = await post(user, csv, "?dryRun=true").expect(200);
+      expect(res.body.sets).toBe(1);
+    });
+
+    it("rejects an empty body", async () => {
+      const user = await createUser(app);
+      await post(user, "   ").expect(400);
+    });
+
+    it("rejects a file with no usable rows", async () => {
+      const user = await createUser(app);
+      await post(user, HEADER).expect(400);
+    });
+
+    it("does not import one user's history into another's account", async () => {
+      const a = await createUser(app);
+      const b = await createUser(app);
+      await post(a, await csvFor(a, 1, 100)).expect(200);
+
+      expect((await b.agent.get("/api/workouts/history").expect(200)).body).toEqual([]);
+    });
+  });
 });

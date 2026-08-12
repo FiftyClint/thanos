@@ -17,6 +17,7 @@ export class HttpError extends Error {
 export const badRequest = (message: string, details?: unknown) => new HttpError(400, message, details);
 export const forbidden = (message = "Forbidden") => new HttpError(403, message);
 export const notFound = (message = "Not found") => new HttpError(404, message);
+export const conflict = (message: string, details?: unknown) => new HttpError(409, message, details);
 
 /** Wrap an async handler so a rejected promise reaches the error middleware. */
 export function asyncHandler<T extends Request>(
