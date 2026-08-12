@@ -22,6 +22,8 @@
  * 3. Progress photos are skipped. Their rows would import fine, but the image
  *    files live in Replit's object storage and would 404 forever.
  */
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { Pool } from "pg";
 import { env } from "../server/env";
 import { logger } from "../server/logger";
@@ -103,6 +105,75 @@ async function connectToSource(connectionString: string): Promise<Pool> {
 
 function exerciseKey(e: Row): string {
   return `${e.program}|${e.day}|${e.number}|${e.name}`;
+}
+
+export interface ExerciseMapping {
+  /** old exercise id → new exercise id */
+  matched: Map<string, string>;
+  /** Old exercises with no counterpart, to be recreated under the legacy program. */
+  unmatched: Row[];
+}
+
+/**
+ * Work out which new exercise row each old one corresponds to.
+ *
+ * Exercise ids are per-database UUIDs, so nothing carries over by id; every
+ * imported set has to be re-pointed by identity. Matching runs from strictest
+ * to loosest and stops at the first hit:
+ *
+ *   1. program + day + number + name — the same slot in the same program
+ *   2. program + day + name         — the movement was renumbered
+ *   3. name within the same program — it moved to a different day
+ *   4. name anywhere                — it exists only in another phase
+ *
+ * Steps 3 and 4 are deliberately separate. The old code had a single
+ * name-keyed map built over every program at once, so a name appearing in more
+ * than one phase resolved to whichever row Postgres happened to return last —
+ * an unordered select, meaning the same import could map the same exercise
+ * differently on two runs. Preferring the exercise's own program first makes
+ * it deterministic and puts the history where it belongs.
+ *
+ * Anything still unmatched is returned rather than dropped: a movement that
+ * was renamed or retired must not take months of logged sets with it.
+ */
+export function buildExerciseMap(sourceExercises: Row[], targetExercises: Row[]): ExerciseMapping {
+  const byFullKey = new Map<string, string>();
+  const byProgramDayName = new Map<string, string>();
+  const byProgramName = new Map<string, string>();
+  const byName = new Map<string, string>();
+
+  // First write wins, over a stably sorted list, so a duplicate name resolves
+  // to the same row on every run.
+  const ordered = [...targetExercises].sort((a, b) =>
+    exerciseKey(a).localeCompare(exerciseKey(b)),
+  );
+  const remember = (map: Map<string, string>, key: string, id: string) => {
+    if (!map.has(key)) map.set(key, id);
+  };
+
+  for (const e of ordered) {
+    const id = e.id as string;
+    remember(byFullKey, exerciseKey(e), id);
+    remember(byProgramDayName, `${e.program}|${e.day}|${e.name}`, id);
+    remember(byProgramName, `${e.program}|${e.name}`, id);
+    remember(byName, e.name as string, id);
+  }
+
+  const matched = new Map<string, string>();
+  const unmatched: Row[] = [];
+
+  for (const old of sourceExercises) {
+    const hit =
+      byFullKey.get(exerciseKey(old)) ??
+      byProgramDayName.get(`${old.program}|${old.day}|${old.name}`) ??
+      byProgramName.get(`${old.program}|${old.name}`) ??
+      byName.get(old.name as string);
+
+    if (hit) matched.set(old.id as string, hit);
+    else unmatched.push(old);
+  }
+
+  return { matched, unmatched };
 }
 
 async function main(): Promise<void> {
@@ -211,39 +282,16 @@ async function main(): Promise<void> {
     const { rows: sourceExercises } = await source.query("select * from exercises");
     const targetExercises = await db.select().from(exercises);
 
-    const byFullKey = new Map(targetExercises.map((e) => [exerciseKey(e as unknown as Row), e.id]));
-    const byProgramDayName = new Map(
-      targetExercises.map((e) => [`${e.program}|${e.day}|${e.name}`, e.id]),
-    );
-    const byName = new Map(targetExercises.map((e) => [e.name, e.id]));
-
-    /**
-     * Find this old exercise in the new database, trying progressively looser
-     * matches. Falling through to a legacy row is deliberate: an exercise that
-     * was renamed or dropped from the program must not take months of logged
-     * sets with it.
-     *
+    /*
      * The legacy program id is outside the set the seeder manages, so a future
-     * `npm run db:seed` will leave these rows alone.
+     * `npm run db:seed` will leave any rows created below alone.
      */
-    const exerciseIdMap = new Map<string, string>();
-    const legacyToCreate: Row[] = [];
-
-    for (const old of sourceExercises) {
-      const key = exerciseKey(old);
-      const match =
-        byFullKey.get(key) ??
-        byProgramDayName.get(`${old.program}|${old.day}|${old.name}`) ??
-        byName.get(old.name as string);
-
-      if (match) {
-        exerciseIdMap.set(old.id as string, match);
-        report.exercisesMatched++;
-      } else {
-        legacyToCreate.push(old);
-        report.exercisesLegacy++;
-      }
-    }
+    const { matched: exerciseIdMap, unmatched: legacyToCreate } = buildExerciseMap(
+      sourceExercises,
+      targetExercises as unknown as Row[],
+    );
+    report.exercisesMatched = exerciseIdMap.size;
+    report.exercisesLegacy = legacyToCreate.length;
 
     if (legacyToCreate.length > 0 && args.dryRun) {
       /*
@@ -520,9 +568,19 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch(async (err) => {
-  logger.fatal({ err }, "import failed");
-  console.error(`\n${(err as Error).message}\n`);
-  await closeDb().catch(() => undefined);
-  process.exit(1);
-});
+/*
+ * Only run when invoked as a script. Without this guard, importing anything
+ * from this file — as the tests do — would connect to both databases and start
+ * a live import as a side effect of the import statement.
+ */
+const invokedDirectly =
+  !!process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (invokedDirectly) {
+  main().catch(async (err) => {
+    logger.fatal({ err }, "import failed");
+    console.error(`\n${(err as Error).message}\n`);
+    await closeDb().catch(() => undefined);
+    process.exit(1);
+  });
+}
