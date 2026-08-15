@@ -31,6 +31,10 @@ export interface IStorage {
   createExercise(exercise: InsertExercise): Promise<Exercise>;
   updateExerciseByKey(id: string, exercise: InsertExercise): Promise<Exercise>;
   deleteExercisesByIds(ids: string[]): Promise<void>;
+  /** Of the given exercises, which ones have logged sets against them. */
+  exercisesWithLoggedSets(ids: string[]): Promise<Set<string>>;
+  /** Move exercises to another program, keeping their id and their logged sets. */
+  retireExercises(ids: string[], program: string): Promise<void>;
 
   // Workout Logs
   getWorkoutLog(id: string): Promise<WorkoutLog | undefined>;
@@ -186,6 +190,37 @@ export class DatabaseStorage implements IStorage {
       .where(eq(exercises.id, id))
       .returning();
     return updated;
+  }
+
+  async exercisesWithLoggedSets(ids: string[]): Promise<Set<string>> {
+    if (ids.length === 0) return new Set();
+    const rows = await db
+      .selectDistinct({ exerciseId: setLogs.exerciseId })
+      .from(setLogs)
+      .where(inArray(setLogs.exerciseId, ids));
+    return new Set(rows.map((r) => r.exerciseId));
+  }
+
+  async retireExercises(ids: string[], program: string): Promise<void> {
+    if (ids.length === 0) return;
+    /*
+     * exercises is unique on (program, day, order, number), and a retired row
+     * keeps the slot it was retired from. Two movements retired from the SAME
+     * slot — the ordinary case when a slot is swapped more than once over a
+     * prep — would collide the second time. Give each one a fresh order at the
+     * end of the retired program so the slot stops being part of its identity.
+     */
+    await db.transaction(async (tx) => {
+      const [{ maxOrder }] = await tx
+        .select({ maxOrder: sql<number | null>`max(${exercises.order})` })
+        .from(exercises)
+        .where(eq(exercises.program, program));
+
+      let next = (maxOrder ?? 0) + 1;
+      for (const id of ids) {
+        await tx.update(exercises).set({ program, order: next++ }).where(eq(exercises.id, id));
+      }
+    });
   }
 
   async deleteExercisesByIds(ids: string[]): Promise<void> {

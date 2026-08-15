@@ -36,7 +36,12 @@ export interface SyncResult {
   inserted: number;
   updated: number;
   removed: number;
+  /** Moved to the legacy program to keep their logged sets. */
+  retired: number;
 }
+
+/** Program id that retired exercises are parked under, outside every sync. */
+export const LEGACY_PROGRAM = "legacy";
 
 /**
  * Make the database match the seed files for one program, exactly.
@@ -51,9 +56,21 @@ export interface SyncResult {
  *   - a row that is new is INSERTED;
  *   - a row in the DB that is no longer in the seed is REMOVED.
  *
- * Removal deletes that exercise's logged sets too, because a set row cannot
- * outlive the exercise it references. `dryRun` reports what would change so you
- * can see the damage before a content edit drops history.
+ * Two cases would otherwise damage history, because (day, order, number) is a
+ * SLOT and the movement occupying it can change:
+ *
+ *   - Swapping the exercise in a slot. Updating in place keeps the row id, so
+ *     every set logged against the old movement silently reappears under the
+ *     new name — 100 lb lateral raises become 100 lb upright rows, and the
+ *     weight suggested for the new movement is a weight for a different one.
+ *   - Dropping an exercise. A set row cannot outlive the exercise it points at,
+ *     so removal takes the logged sets with it.
+ *
+ * In both cases, when the old exercise has logged sets it is RETIRED instead:
+ * moved to the legacy program, keeping its id, its name and its history. The
+ * new movement is inserted fresh and starts, correctly, with no history.
+ *
+ * `dryRun` reports what would change without writing.
  */
 export async function syncProgram(
   program: ProgramId,
@@ -63,25 +80,51 @@ export async function syncProgram(
   const existing = await storage.getAllExercisesByProgram(program);
   const existingByKey = new Map(existing.map((e) => [keyOf(e), e]));
 
-  const result: SyncResult = { program, inserted: 0, updated: 0, removed: 0 };
-  const seenKeys = new Set<string>();
+  const result: SyncResult = { program, inserted: 0, updated: 0, removed: 0, retired: 0 };
 
+  // A slot whose movement changed, and any slot that vanished, is only safe to
+  // overwrite when nothing has been logged against what was there.
+  const desiredKeys = new Set(desired.map(keyOf));
+  const stale = existing.filter((e) => !desiredKeys.has(keyOf(e)));
+
+  const hasHistory = await storage.exercisesWithLoggedSets([
+    ...desired.flatMap((e) => {
+      const current = existingByKey.get(keyOf(e));
+      return current && current.name !== e.name ? [current.id] : [];
+    }),
+    ...stale.map((e) => e.id),
+  ]);
+
+  const swapsToRetire = desired.flatMap((e) => {
+    const current = existingByKey.get(keyOf(e));
+    return current && current.name !== e.name && hasHistory.has(current.id) ? [current.id] : [];
+  });
+  const staleToRetire = stale.filter((e) => hasHistory.has(e.id)).map((e) => e.id);
+  const staleToDelete = stale.filter((e) => !hasHistory.has(e.id)).map((e) => e.id);
+
+  result.retired = swapsToRetire.length + staleToRetire.length;
+  result.removed = staleToDelete.length;
+
+  /*
+   * Retire BEFORE inserting. exercises is unique on (program, day, order,
+   * number), so the replacement for a swapped slot collides with the row it
+   * replaces until that row has left this program.
+   */
+  if (!opts.dryRun) {
+    await storage.retireExercises([...swapsToRetire, ...staleToRetire], LEGACY_PROGRAM);
+    await storage.deleteExercisesByIds(staleToDelete);
+  }
+
+  const retired = new Set(swapsToRetire);
   for (const exercise of desired) {
-    const key = keyOf(exercise);
-    seenKeys.add(key);
-    if (existingByKey.has(key)) {
+    const current = existingByKey.get(keyOf(exercise));
+    if (current && !retired.has(current.id)) {
       result.updated++;
-      if (!opts.dryRun) await storage.updateExerciseByKey(existingByKey.get(key)!.id, exercise);
+      if (!opts.dryRun) await storage.updateExerciseByKey(current.id, exercise);
     } else {
       result.inserted++;
       if (!opts.dryRun) await storage.createExercise(exercise);
     }
-  }
-
-  const staleIds = existing.filter((e) => !seenKeys.has(keyOf(e))).map((e) => e.id);
-  result.removed = staleIds.length;
-  if (staleIds.length > 0 && !opts.dryRun) {
-    await storage.deleteExercisesByIds(staleIds);
   }
 
   return result;
@@ -93,7 +136,10 @@ export async function syncAllPrograms(opts: { dryRun?: boolean } = {}): Promise<
     const result = await syncProgram(program, opts);
     results.push(result);
     const verb = opts.dryRun ? "would sync" : "synced";
-    logger.info(result, `${verb} ${program}: +${result.inserted} ~${result.updated} -${result.removed}`);
+    logger.info(
+      result,
+      `${verb} ${program}: +${result.inserted} ~${result.updated} -${result.removed} retired:${result.retired}`,
+    );
   }
   return results;
 }

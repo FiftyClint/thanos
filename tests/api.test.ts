@@ -682,6 +682,117 @@ suite("API", () => {
     });
   });
 
+  describe("program sync", () => {
+    /**
+     * The seeder keys an exercise by its SLOT — (day, order, number) — because
+     * that is what survives a content edit. But the movement in a slot can
+     * change, and then the slot is a lie: updating in place keeps the row id,
+     * so every set logged against the old movement reappears under the new
+     * name, and the weight suggested for the new one is a weight for a
+     * different exercise.
+     */
+    const slot = { day: 1, order: 900, number: "TEST", defaultSets: 3, repRange: "8-12", tempo: "2-0-1-1", rir: "1-2", restSeconds: "75s", notes: "", alternate: "", videoUrl: "", isSupersetPart: false, supersetGroup: null, segment: "working" as const };
+
+    async function seedOne(name: string, inputType = "weight_reps") {
+      const { syncProgram, PROGRAMS } = await import("../server/seed");
+      const original = [...PROGRAMS.phase3];
+      PROGRAMS.phase3 = [...original, { ...slot, name, inputType, program: "phase3" }];
+      const result = await syncProgram("phase3");
+      PROGRAMS.phase3 = original;
+      return result;
+    }
+
+    async function logASetAgainst(user: TestUser, name: string) {
+      const list = await user.agent.get("/api/exercises/1?week=1").expect(200);
+      const target = list.body.find((e: { name: string }) => e.name === name);
+      expect(target, `exercise ${name} should be in day 1`).toBeTruthy();
+      await user.agent
+        .post("/api/workouts/complete")
+        .send({ day: 1, week: 1, sets: [{ exerciseId: target.id, setNumber: 1, weightLbs: 100, reps: 10 }] })
+        .expect(200);
+      return target.id;
+    }
+
+    it("retires a swapped exercise that has history, instead of renaming it", async () => {
+      const user = await createUser(app);
+      await seedOne("Old Movement");
+      const oldId = await logASetAgainst(user, "Old Movement");
+
+      const result = await seedOne("New Movement");
+      expect(result.retired).toBeGreaterThanOrEqual(1);
+
+      // The logged set still belongs to the movement it was performed on.
+      const history = await user.agent.get("/api/workouts/history").expect(200);
+      const logged = history.body[0].sets.find((s: { exerciseId: string }) => s.exerciseId === oldId);
+      expect(logged, "the original set must survive").toBeTruthy();
+      expect(logged.weightLbs).toBe(100);
+
+      // And the new movement is a different row, with no borrowed history.
+      const day = await user.agent.get("/api/exercises/1?week=1").expect(200);
+      const fresh = day.body.find((e: { name: string }) => e.name === "New Movement");
+      expect(fresh).toBeTruthy();
+      expect(fresh.id).not.toBe(oldId);
+      expect(day.body.some((e: { name: string }) => e.name === "Old Movement")).toBe(false);
+    });
+
+    it("does not suggest the old movement's weight for the new one", async () => {
+      // The failure this whole mechanism exists to prevent.
+      const user = await createUser(app);
+      await seedOne("Heavy Old Thing");
+      await logASetAgainst(user, "Heavy Old Thing");
+      await seedOne("Light New Thing");
+
+      const day = await user.agent.get("/api/exercises/1?week=1").expect(200);
+      const fresh = day.body.find((e: { name: string }) => e.name === "Light New Thing");
+      const recs = await user.agent.get("/api/sets/recommendations/1?week=2").expect(200);
+      for (const rec of recs.body[fresh.id] ?? []) expect(rec.weight).toBeNull();
+    });
+
+    it("updates in place when the slot keeps the same movement", async () => {
+      // The ordinary case: editing notes or sets must not orphan history.
+      const user = await createUser(app);
+      await seedOne("Stable Movement");
+      const id = await logASetAgainst(user, "Stable Movement");
+
+      const result = await seedOne("Stable Movement");
+      expect(result.retired).toBe(0);
+
+      const day = await user.agent.get("/api/exercises/1?week=1").expect(200);
+      expect(day.body.find((e: { name: string }) => e.name === "Stable Movement").id).toBe(id);
+    });
+
+    it("deletes a dropped exercise that was never logged", async () => {
+      // Nothing to protect, so no legacy clutter.
+      await seedOne("Never Logged");
+      const { syncProgram } = await import("../server/seed");
+      const result = await syncProgram("phase3");
+      expect(result.removed).toBeGreaterThanOrEqual(1);
+      expect(result.retired).toBe(0);
+    });
+
+    it("keeps a dropped exercise that was logged", async () => {
+      const user = await createUser(app);
+      await seedOne("Dropped But Logged");
+      const id = await logASetAgainst(user, "Dropped But Logged");
+
+      const { syncProgram } = await import("../server/seed");
+      const result = await syncProgram("phase3");
+      expect(result.retired).toBeGreaterThanOrEqual(1);
+
+      const history = await user.agent.get("/api/workouts/history").expect(200);
+      expect(history.body[0].sets.some((s: { exerciseId: string }) => s.exerciseId === id)).toBe(true);
+    });
+
+    it("is idempotent", async () => {
+      const { syncProgram } = await import("../server/seed");
+      await syncProgram("phase3");
+      const second = await syncProgram("phase3");
+      expect(second.inserted).toBe(0);
+      expect(second.removed).toBe(0);
+      expect(second.retired).toBe(0);
+    });
+  });
+
   describe("history import", () => {
     const HEADER =
       "Date,Week,Phase,Day,Exercise#,Exercise,Set,Side,Weight(lbs),Reps,Duration(s),RIR,Band";
