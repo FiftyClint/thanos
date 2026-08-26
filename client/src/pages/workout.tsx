@@ -16,6 +16,8 @@ import { getCurrentWeek, getCurrentPhase, getDayName, getDayFocus, formatTime, p
 import { usePrep } from "@/hooks/use-prep";
 import { SessionCheck, EMPTY_SESSION_CHECK, type SessionCheckValue } from "@/components/SessionCheck";
 import ProgramSelector from "@/components/ProgramSelector";
+import SwapExercise, { type SwapTarget } from "@/components/SwapExercise";
+import LastPerformed, { type LastPerformedData } from "@/components/LastPerformed";
 import { ChevronDown, ChevronUp, Play, Clock, Timer, AlertTriangle, CheckCircle2, X, Pause, RotateCcw, Download, Plus, ArrowLeftRight } from "lucide-react";
 import type { Exercise, SetLog, WorkoutLog, User } from "@shared/schema";
 
@@ -232,6 +234,8 @@ interface ExerciseWithSets extends Exercise {
 /** The shape the server accepts — client-only bookkeeping deliberately absent. */
 export interface SetToSave {
   exerciseId: string;
+  /** Set when a different movement was performed in this slot. */
+  substituteName?: string;
   setNumber: number;
   side?: string;
   weightLbs?: number;
@@ -273,10 +277,18 @@ function wasPerformed(set: SetData): boolean {
  *
  * Covered by tests/workout-save.test.ts.
  */
-export function collectSetsToSave(exerciseData: Map<string, SetData[]>): SetToSave[] {
+export function collectSetsToSave(
+  exerciseData: Map<string, SetData[]>,
+  /** Planned exercise id → the movement actually performed in that slot. */
+  substitutions: Map<string, string> = new Map(),
+): SetToSave[] {
   return Array.from(exerciseData.entries()).flatMap(([exerciseId, sets]) =>
     sets.filter(wasPerformed).map((s) => ({
+      // Deliberately the PLANNED id: the server validates it against the day
+      // and then re-points the row at the substitute. Sending the substitute's
+      // own id would mean the server trusting an arbitrary id from the client.
       exerciseId,
+      substituteName: substitutions.get(exerciseId),
       setNumber: s.setNumber,
       side: s.side,
       weightLbs: s.weightLbs,
@@ -329,6 +341,12 @@ export default function Workout() {
 
   const { data: previousSets } = useQuery<SetLog[]>({
     queryKey: ["/api/sets/previous", day],
+  });
+
+  // What was actually performed in each of this day's slots last time —
+  // keyed by planned exercise id, and naming the substitute when there was one.
+  const { data: lastPerformed } = useQuery<Record<string, LastPerformedData>>({
+    queryKey: [`/api/sets/last-performed/${day}`],
   });
 
   // Smart weight recommendations
@@ -485,16 +503,77 @@ export default function Workout() {
     }
   };
 
-  const [swappedExercises, setSwappedExercises] = useState<Set<string>>(new Set());
+  /**
+   * Substitutes chosen this session: planned exercise id → movement performed.
+   *
+   * This replaced a Set of "swapped" ids that only changed the card's label
+   * while the sets still saved under the prescribed exercise — so the app
+   * learned a weight for a movement that was never performed.
+   */
+  const [substitutions, setSubstitutions] = useState<Map<string, string>>(new Map());
+  const [swapTarget, setSwapTarget] = useState<SwapTarget | null>(null);
 
-  const toggleSwap = (exerciseId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setSwappedExercises((prev) => {
-      const next = new Set(prev);
-      if (next.has(exerciseId)) next.delete(exerciseId);
-      else next.add(exerciseId);
+  /** Refill one exercise's rows from a recommendation payload, keeping entered values. */
+  const applyRecommendations = (
+    exerciseId: string,
+    recs: Array<{ setNumber: number; side?: string; weight: number | null; reps: number | null; source: string }>,
+  ) => {
+    setExerciseData((prev) => {
+      const next = new Map(prev);
+      const rows = next.get(exerciseId);
+      if (!rows) return prev;
+
+      next.set(
+        exerciseId,
+        rows.map((row) => {
+          // Anything already typed is the athlete's, not ours to overwrite.
+          if (row.reps !== undefined || row.weightSource === "user_edited") return row;
+          const rec = recs.find((r) => r.setNumber === row.setNumber && (r.side ?? undefined) === row.side);
+          return {
+            ...row,
+            weightLbs: rec?.weight ?? undefined,
+            weightSource: (rec?.source as WeightSource) ?? "no_history",
+            recommendedWeight: rec?.weight ?? undefined,
+            recommendedReps: rec?.reps ?? undefined,
+          };
+        }),
+      );
       return next;
     });
+  };
+
+  const chooseSubstitute = (exerciseId: string, name: string | null) => {
+    setSubstitutions((prev) => {
+      const next = new Map(prev);
+      if (name) next.set(exerciseId, name);
+      else next.delete(exerciseId);
+      return next;
+    });
+
+    /*
+     * The day's recommendations were fetched for the prescribed movements, so
+     * they say nothing about a substitute. Pull that movement's own history and
+     * refill the rows — otherwise a swap keeps suggesting the weight of the
+     * exercise being replaced, which is the whole problem being fixed.
+     */
+    if (!name) {
+      applyRecommendations(exerciseId, weightRecommendations?.[exerciseId] ?? []);
+      return;
+    }
+
+    const rows = exerciseData.get(exerciseId) ?? [];
+    const params = new URLSearchParams({
+      name,
+      plannedExerciseId: exerciseId,
+      week: String(currentWeek),
+      sets: String(Math.max(1, new Set(rows.map((r) => r.setNumber)).size)),
+    });
+
+    fetch(`/api/substitutes/recommendation?${params}`, { credentials: "include" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body) => applyRecommendations(exerciseId, body?.recommendations ?? []))
+      // A movement with no history simply has nothing to suggest.
+      .catch(() => applyRecommendations(exerciseId, []));
   };
 
   const addSet = (exercise: Exercise) => {
@@ -534,7 +613,7 @@ export default function Workout() {
     });
   };
 
-  const setsToSave = collectSetsToSave(exerciseData);
+  const setsToSave = collectSetsToSave(exerciseData, substitutions);
 
   const completeWorkoutMutation = useMutation({
     mutationFn: async () => {
@@ -971,8 +1050,9 @@ export default function Workout() {
                     ).length
                   : sets.filter((s) => s.completed).length;
                 const totalSets = isUnilateral ? unilateralSetNums!.length : sets.length;
-                const isSwapped = swappedExercises.has(exercise.id);
-                const displayName = isSwapped && exercise.alternate ? exercise.alternate : exercise.name;
+                const substituteName = substitutions.get(exercise.id);
+                const isSwapped = !!substituteName;
+                const displayName = substituteName ?? exercise.name;
                 
                 return (
                   <Card key={exercise.id} data-testid={`card-exercise-${exercise.number}`}>
@@ -999,20 +1079,24 @@ export default function Workout() {
                                     <Play className="w-4 h-4" />
                                   </a>
                                 )}
-                                {exercise.alternate && (
+                                {exercise.segment === "working" && (
                                   <button
-                                    onClick={(e) => toggleSwap(exercise.id, e)}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setSwapTarget({ exercise, current: substituteName ?? null });
+                                    }}
                                     className={`transition-colors ${isSwapped ? "text-accent" : "text-muted-foreground hover:text-foreground"}`}
-                                    title={isSwapped ? `Switch back to ${exercise.name}` : `Swap to ${exercise.alternate}`}
+                                    title={isSwapped ? `Logging ${substituteName} instead` : "Log a different movement"}
                                     data-testid={`button-swap-${exercise.number}`}
                                   >
                                     <ArrowLeftRight className="w-3.5 h-3.5" />
                                   </button>
                                 )}
                               </div>
-                              {isSwapped && exercise.alternate && (
+                              {isSwapped && (
                                 <div className="text-xs text-muted-foreground/60 mt-0.5 line-through">{exercise.name}</div>
                               )}
+                              <LastPerformed data={lastPerformed?.[exercise.id]} plannedName={exercise.name} />
                               {suggestionSummary && (
                                 <div className="text-sm text-accent/80 mt-1 font-medium" data-testid={`text-suggestion-${exercise.number}`}>
                                   Suggested: {suggestionSummary}
@@ -1107,8 +1191,9 @@ export default function Workout() {
                             ).length
                           : sets.filter((s) => s.completed).length;
                         const totalSets = isUnilateralF ? unilateralSetNumsF!.length : sets.length;
-                        const isSwapped = swappedExercises.has(exercise.id);
-                        const displayName = isSwapped && exercise.alternate ? exercise.alternate : exercise.name;
+                        const substituteName = substitutions.get(exercise.id);
+                        const isSwapped = !!substituteName;
+                        const displayName = substituteName ?? exercise.name;
                         
                         return (
                           <Card key={exercise.id} data-testid={`card-finisher-${exercise.number}`}>
@@ -1134,20 +1219,22 @@ export default function Workout() {
                                             <Play className="w-4 h-4" />
                                           </a>
                                         )}
-                                        {exercise.alternate && (
-                                          <button
-                                            onClick={(e) => toggleSwap(exercise.id, e)}
-                                            className={`transition-colors ${isSwapped ? "text-accent" : "text-muted-foreground hover:text-foreground"}`}
-                                            title={isSwapped ? `Switch back to ${exercise.name}` : `Swap to ${exercise.alternate}`}
-                                            data-testid={`button-swap-finisher-${exercise.number}`}
-                                          >
-                                            <ArrowLeftRight className="w-3.5 h-3.5" />
-                                          </button>
-                                        )}
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setSwapTarget({ exercise, current: substituteName ?? null });
+                                          }}
+                                          className={`transition-colors ${isSwapped ? "text-accent" : "text-muted-foreground hover:text-foreground"}`}
+                                          title={isSwapped ? `Logging ${substituteName} instead` : "Log a different movement"}
+                                          data-testid={`button-swap-finisher-${exercise.number}`}
+                                        >
+                                          <ArrowLeftRight className="w-3.5 h-3.5" />
+                                        </button>
                                       </div>
-                                      {isSwapped && exercise.alternate && (
+                                      {isSwapped && (
                                         <div className="text-xs text-muted-foreground/60 mt-0.5 line-through">{exercise.name}</div>
                                       )}
+                                      <LastPerformed data={lastPerformed?.[exercise.id]} plannedName={exercise.name} />
                                     </div>
                                     <div className="flex items-center gap-2">
                                       <span className="text-sm text-muted-foreground">
@@ -1310,6 +1397,12 @@ export default function Workout() {
           )}
         </Button>
       </div>
+
+      <SwapExercise
+        target={swapTarget}
+        onClose={() => setSwapTarget(null)}
+        onChoose={chooseSubstitute}
+      />
     </div>
   );
 }

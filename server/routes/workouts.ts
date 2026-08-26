@@ -5,8 +5,10 @@ import {
   dayParamSchema,
   weekParamSchema,
   listQuerySchema,
+  MAX_WEEK,
   type InsertSetLog,
   type WorkoutLog,
+  type Exercise,
 } from "@shared/schema";
 import { storage } from "../storage";
 import { logger } from "../logger";
@@ -15,6 +17,12 @@ import { asyncHandler, notFound } from "../middleware/error";
 import { getCurrentPhase, applyProgramRules, isUnilateralInputType } from "../lib/program";
 import { setsForDeload } from "@shared/program-rules";
 import { getRecommendedWeightsForExercise } from "../lib/autofill";
+import {
+  resolveSubstitute,
+  getLastPerformedBySlot,
+  getRecentSubstitutes,
+  normaliseSubstituteName,
+} from "../lib/substitutions";
 import { analyseExercisePerformance, groupSetsByExercise } from "../lib/progressionAnalysis";
 import { syncTrainingSession } from "../integrations/notion";
 
@@ -139,22 +147,58 @@ workoutRouter.post(
     }
 
     if (acceptedSets.length > 0) {
-      const rows: InsertSetLog[] = acceptedSets.map((s) => ({
-        workoutLogId: workoutLog!.id,
-        exerciseId: s.exerciseId,
-        userId,
-        setNumber: s.setNumber,
-        weightLbs: s.weightLbs ?? null,
-        reps: s.reps ?? null,
-        side: s.side ?? null,
-        durationSecs: s.durationSecs ?? null,
-        rirActual: s.rirActual ?? null,
-        isFailure: s.isFailure ?? false,
-        bandNote: s.bandNote ?? null,
-        cardioNotes: s.cardioNotes ?? null,
-      }));
+      /*
+       * Re-point substituted sets at the movement that was actually performed.
+       *
+       * The set arrives naming the PLANNED exercise — that is what the day
+       * check above validated — plus the substitute's name. Saving it under the
+       * planned id would teach that exercise a weight from a different
+       * movement; saving it with no record of the slot would lose what the
+       * swap was for. It gets both: exerciseId = substitute, and the slot in
+       * substitutedForExerciseId.
+       *
+       * Names are resolved once each, so eight sets of one substitute do not
+       * create eight rows or eight lookups.
+       */
+      const substitutes = new Map<string, Exercise>();
+      const cacheKey = (plannedId: string, name: string) => `${plannedId}|${name.toLowerCase()}`;
+
+      for (const set of acceptedSets) {
+        const name = set.substituteName?.trim();
+        if (!name) continue;
+        const key = cacheKey(set.exerciseId, name);
+        if (substitutes.has(key)) continue;
+        substitutes.set(key, await resolveSubstitute(name, exerciseById.get(set.exerciseId)!, resolvedProgram));
+      }
+
+      const rows: InsertSetLog[] = acceptedSets.map((s) => {
+        const name = s.substituteName?.trim();
+        const substitute = name ? substitutes.get(cacheKey(s.exerciseId, name)) : undefined;
+
+        return {
+          workoutLogId: workoutLog!.id,
+          exerciseId: substitute?.id ?? s.exerciseId,
+          substitutedForExerciseId: substitute ? s.exerciseId : null,
+          userId,
+          setNumber: s.setNumber,
+          weightLbs: s.weightLbs ?? null,
+          reps: s.reps ?? null,
+          side: s.side ?? null,
+          durationSecs: s.durationSecs ?? null,
+          rirActual: s.rirActual ?? null,
+          isFailure: s.isFailure ?? false,
+          bandNote: s.bandNote ?? null,
+          cardioNotes: s.cardioNotes ?? null,
+        };
+      });
       await storage.createSetLogs(rows);
-      await generateRecommendations(userId, week, day, acceptedSets, exerciseById);
+
+      // Progression cues compare like with like, so a substituted set is judged
+      // against that substitute's own history, not the planned exercise's.
+      const forAnalysis = acceptedSets.map((s, i) => ({ ...s, exerciseId: rows[i].exerciseId }));
+      const analysisExercises = new Map(exerciseById);
+      for (const substitute of substitutes.values()) analysisExercises.set(substitute.id, substitute);
+      await generateRecommendations(userId, week, day, forAnalysis, analysisExercises);
     }
 
     res.json(workoutLog);
@@ -250,6 +294,87 @@ workoutRouter.get(
       );
     }
     res.json(result);
+  }),
+);
+
+/**
+ * What was actually performed in each of this day's slots, last time.
+ *
+ * Keyed by the PLANNED exercise id, so the workout screen can say "last week
+ * you did X here" against the row you are looking at — including when X was a
+ * substitute for something else.
+ */
+workoutRouter.get(
+  "/sets/last-performed/:day",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { day } = dayParamSchema.parse(req.params);
+    const userId = userIdOf(req);
+    const program = await activeProgram(userId);
+    const exercises = await storage.getExercisesByDay(day, program);
+    res.json(await getLastPerformedBySlot(userId, exercises));
+  }),
+);
+
+/** Substitutes this athlete has used before — the top of the swap picker. */
+workoutRouter.get(
+  "/substitutes/recent",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    res.json(await getRecentSubstitutes(userIdOf(req)));
+  }),
+);
+
+/**
+ * Weight suggestion for a movement chosen mid-session.
+ *
+ * Swapping to a substitute has to answer "what did I do on THIS last time",
+ * and the day's recommendation payload was built before the swap existed. The
+ * name is resolved the same way the save path resolves it, so the weight shown
+ * is the weight of the row the sets will land on.
+ */
+workoutRouter.get(
+  "/substitutes/recommendation",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { name, plannedExerciseId, week, sets } = z
+      .object({
+        name: z.string().trim().min(1).max(120),
+        plannedExerciseId: z.string().uuid(),
+        week: z.coerce.number().int().min(1).max(MAX_WEEK),
+        sets: z.coerce.number().int().min(1).max(20).default(3),
+      })
+      .parse(req.query);
+
+    const userId = userIdOf(req);
+    const program = await activeProgram(userId);
+    const dayExercises = await storage.getAllExercises(program);
+    const planned = dayExercises.find((e) => e.id === plannedExerciseId);
+    if (!planned) throw notFound("Exercise not found");
+
+    // Read-only: resolve by name without creating a row for a substitute the
+    // athlete is only browsing. Nothing is written until the session is saved.
+    const existing = await storage.findExercisesByName(normaliseSubstituteName(name));
+    if (existing.length === 0) {
+      res.json({ exerciseId: null, recommendations: [] });
+      return;
+    }
+
+    const match =
+      existing.find((e) => e.program === program) ??
+      [...existing].sort((a, b) => a.program.localeCompare(b.program) || a.id.localeCompare(b.id))[0];
+
+    res.json({
+      exerciseId: match.id,
+      name: match.name,
+      recommendations: await getRecommendedWeightsForExercise(
+        userId,
+        match.id,
+        sets,
+        week,
+        isUnilateralInputType(planned.inputType),
+      ),
+    });
   }),
 );
 

@@ -682,6 +682,233 @@ suite("API", () => {
     });
   });
 
+  describe("exercise substitutions", () => {
+    /**
+     * The machine is taken, so you do something else in that slot.
+     *
+     * The old swap control only relabelled the card — sets still saved under
+     * the prescribed exercise, teaching it a weight from a movement that was
+     * never performed. Every test here is about keeping the two apart.
+     */
+    async function dayExercises(user: TestUser, day = 1) {
+      const res = await user.agent.get(`/api/exercises/${day}?week=1`).expect(200);
+      return res.body as Array<{ id: string; name: string; inputType: string; segment: string }>;
+    }
+
+    async function loaded(user: TestUser, day = 1) {
+      const list = await dayExercises(user, day);
+      return list.find((e) => e.segment === "working" && e.inputType === "weight_reps")!;
+    }
+
+    function logSet(user: TestUser, body: Record<string, unknown>) {
+      return user.agent.post("/api/workouts/complete").send(body).expect(200);
+    }
+
+    it("saves the substitute, not the exercise it replaced", async () => {
+      const user = await createUser(app);
+      const planned = await loaded(user);
+
+      await logSet(user, {
+        day: 1,
+        week: 1,
+        sets: [{ exerciseId: planned.id, setNumber: 1, weightLbs: 60, reps: 12, substituteName: "Machine Lateral Raise" }],
+      });
+
+      const history = await user.agent.get("/api/workouts/history").expect(200);
+      const [set] = history.body[0].sets;
+      expect(set.exerciseId).not.toBe(planned.id);
+      expect(set.substitutedForExerciseId).toBe(planned.id);
+      expect(set.weightLbs).toBe(60);
+    });
+
+    it("does not suggest the substitute's weight for the planned exercise", async () => {
+      // The corruption this whole feature exists to prevent.
+      const user = await createUser(app);
+      const planned = await loaded(user);
+
+      await logSet(user, {
+        day: 1,
+        week: 1,
+        sets: [{ exerciseId: planned.id, setNumber: 1, weightLbs: 999, reps: 12, substituteName: "Something Else Entirely" }],
+      });
+
+      const recs = await user.agent.get("/api/sets/recommendations/1?week=2").expect(200);
+      for (const rec of recs.body[planned.id] ?? []) expect(rec.weight).not.toBe(999);
+    });
+
+    it("builds the substitute its own history", async () => {
+      const user = await createUser(app);
+      const planned = await loaded(user);
+
+      await logSet(user, {
+        day: 1,
+        week: 1,
+        sets: [{ exerciseId: planned.id, setNumber: 1, weightLbs: 75, reps: 12, substituteName: "Machine Lateral Raise" }],
+      });
+
+      const res = await user.agent
+        .get(`/api/substitutes/recommendation?name=Machine Lateral Raise&plannedExerciseId=${planned.id}&week=2&sets=2`)
+        .expect(200);
+      expect(res.body.recommendations.some((r: { weight: number | null }) => r.weight === 75)).toBe(true);
+    });
+
+    it("reports what was done in the slot last time, by name", async () => {
+      const user = await createUser(app);
+      const planned = await loaded(user);
+
+      await logSet(user, {
+        day: 1,
+        week: 3,
+        sets: [{ exerciseId: planned.id, setNumber: 1, weightLbs: 60, reps: 12, substituteName: "Machine Lateral Raise" }],
+      });
+
+      const res = await user.agent.get("/api/sets/last-performed/1").expect(200);
+      expect(res.body[planned.id]).toMatchObject({
+        name: "Machine Lateral Raise",
+        wasSubstitute: true,
+        week: 3,
+      });
+      expect(res.body[planned.id].sets[0].weightLbs).toBe(60);
+    });
+
+    it("reports the prescribed movement when nothing was swapped", async () => {
+      const user = await createUser(app);
+      const planned = await loaded(user);
+
+      await logSet(user, { day: 1, week: 2, sets: [{ exerciseId: planned.id, setNumber: 1, weightLbs: 135, reps: 8 }] });
+
+      const res = await user.agent.get("/api/sets/last-performed/1").expect(200);
+      expect(res.body[planned.id]).toMatchObject({ name: planned.name, wasSubstitute: false, week: 2 });
+    });
+
+    it("reuses an existing movement rather than creating a duplicate", async () => {
+      // Substituting in something the program already prescribes elsewhere must
+      // build ONE history for that movement, not a parallel copy under the
+      // "alternate" program.
+      const user = await createUser(app);
+      const planned = await loaded(user);
+      const all = (await user.agent.get("/api/exercises").expect(200)).body as Array<{
+        id: string;
+        name: string;
+        program: string;
+        segment: string;
+      }>;
+      const elsewhere = all.find(
+        (e) => e.segment === "working" && e.name !== planned.name && all.filter((o) => o.name === e.name).length === 1,
+      )!;
+
+      await logSet(user, {
+        day: 1,
+        week: 1,
+        sets: [{ exerciseId: planned.id, setNumber: 1, weightLbs: 100, reps: 10, substituteName: elsewhere.name }],
+      });
+
+      const history = await user.agent.get("/api/workouts/history").expect(200);
+      expect(history.body[0].sets[0].exerciseId).toBe(elsewhere.id);
+    });
+
+    it("resolves a repeated name the same way every time", async () => {
+      // "Stomach Vacuum" is on all six days. Which row wins does not matter, but
+      // it must not vary between sessions or the history splits in two.
+      const user = await createUser(app);
+      const planned = await loaded(user);
+      const repeated = "Stomach Vacuum";
+
+      await logSet(user, {
+        day: 1,
+        week: 1,
+        sets: [{ exerciseId: planned.id, setNumber: 1, weightLbs: 10, reps: 10, substituteName: repeated }],
+      });
+      await logSet(user, {
+        day: 1,
+        week: 2,
+        sets: [{ exerciseId: planned.id, setNumber: 1, weightLbs: 20, reps: 10, substituteName: repeated }],
+      });
+
+      const history = await user.agent.get("/api/workouts/history").expect(200);
+      const ids = new Set(history.body.flatMap((w: { sets: Array<{ exerciseId: string }> }) => w.sets.map((s) => s.exerciseId)));
+      expect(ids.size).toBe(1);
+    });
+
+    it("keeps the newest session when a slot was swapped in one week and not the next", async () => {
+      const user = await createUser(app);
+      const planned = await loaded(user);
+
+      await logSet(user, {
+        day: 1,
+        week: 1,
+        sets: [{ exerciseId: planned.id, setNumber: 1, weightLbs: 60, reps: 12, substituteName: "Machine Lateral Raise" }],
+      });
+      await logSet(user, { day: 1, week: 2, sets: [{ exerciseId: planned.id, setNumber: 1, weightLbs: 135, reps: 8 }] });
+
+      const res = await user.agent.get("/api/sets/last-performed/1").expect(200);
+      expect(res.body[planned.id]).toMatchObject({ wasSubstitute: false, week: 2 });
+    });
+
+    it("resolves one substitute once however many sets use it", async () => {
+      const user = await createUser(app);
+      const planned = await loaded(user);
+
+      await logSet(user, {
+        day: 1,
+        week: 1,
+        sets: [1, 2, 3].map((setNumber) => ({
+          exerciseId: planned.id,
+          setNumber,
+          weightLbs: 60,
+          reps: 12,
+          substituteName: "Machine Lateral Raise",
+        })),
+      });
+
+      const history = await user.agent.get("/api/workouts/history").expect(200);
+      const ids = new Set(history.body[0].sets.map((s: { exerciseId: string }) => s.exerciseId));
+      expect(ids.size).toBe(1);
+    });
+
+    it("offers substitutes used before", async () => {
+      const user = await createUser(app);
+      const planned = await loaded(user);
+      expect((await user.agent.get("/api/substitutes/recent").expect(200)).body).toEqual([]);
+
+      await logSet(user, {
+        day: 1,
+        week: 1,
+        sets: [{ exerciseId: planned.id, setNumber: 1, weightLbs: 60, reps: 12, substituteName: "Machine Lateral Raise" }],
+      });
+
+      const res = await user.agent.get("/api/substitutes/recent").expect(200);
+      expect(res.body.map((e: { name: string }) => e.name)).toContain("Machine Lateral Raise");
+    });
+
+    it("rejects a substitute name that is blank or absurd", async () => {
+      const user = await createUser(app);
+      const planned = await loaded(user);
+      const set = { exerciseId: planned.id, setNumber: 1, weightLbs: 60, reps: 12 };
+
+      await user.agent.post("/api/workouts/complete").send({ day: 1, week: 1, sets: [{ ...set, substituteName: "   " }] }).expect(400);
+      await user.agent
+        .post("/api/workouts/complete")
+        .send({ day: 1, week: 1, sets: [{ ...set, substituteName: "x".repeat(500) }] })
+        .expect(400);
+    });
+
+    it("keeps one athlete's substitutes out of another's", async () => {
+      const a = await createUser(app);
+      const b = await createUser(app);
+      const planned = await loaded(a);
+
+      await logSet(a, {
+        day: 1,
+        week: 1,
+        sets: [{ exerciseId: planned.id, setNumber: 1, weightLbs: 60, reps: 12, substituteName: "Machine Lateral Raise" }],
+      });
+
+      expect((await b.agent.get("/api/substitutes/recent").expect(200)).body).toEqual([]);
+      expect((await b.agent.get("/api/sets/last-performed/1").expect(200)).body).toEqual({});
+    });
+  });
+
   describe("program sync", () => {
     /**
      * The seeder keys an exercise by its SLOT — (day, order, number) — because

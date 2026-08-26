@@ -29,6 +29,8 @@ export interface IStorage {
   getAllExercises(program?: string): Promise<Exercise[]>;
   getAllExercisesByProgram(program: string): Promise<Exercise[]>;
   createExercise(exercise: InsertExercise): Promise<Exercise>;
+  /** Every exercise with this exact name, across all programs. */
+  findExercisesByName(name: string): Promise<Exercise[]>;
   updateExerciseByKey(id: string, exercise: InsertExercise): Promise<Exercise>;
   deleteExercisesByIds(ids: string[]): Promise<void>;
   /** Of the given exercises, which ones have logged sets against them. */
@@ -161,6 +163,10 @@ export class DatabaseStorage implements IStorage {
       .from(exercises)
       .where(eq(exercises.program, program))
       .orderBy(asc(exercises.day), asc(exercises.order));
+  }
+
+  async findExercisesByName(name: string): Promise<Exercise[]> {
+    return db.select().from(exercises).where(eq(exercises.name, name));
   }
 
   async createExercise(exercise: InsertExercise): Promise<Exercise> {

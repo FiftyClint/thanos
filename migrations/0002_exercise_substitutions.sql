@@ -1,0 +1,3 @@
+ALTER TABLE "set_logs" ADD COLUMN "substituted_for_exercise_id" varchar(36);--> statement-breakpoint
+ALTER TABLE "set_logs" ADD CONSTRAINT "set_logs_substituted_for_exercise_id_exercises_id_fk" FOREIGN KEY ("substituted_for_exercise_id") REFERENCES "public"."exercises"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "set_logs_substituted_for_idx" ON "set_logs" USING btree ("user_id","substituted_for_exercise_id");

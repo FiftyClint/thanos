@@ -158,12 +158,30 @@ export const setLogs = pgTable(
     cardioNotes: text("cardio_notes"),
     recommendedWeight: real("recommended_weight"),
     userOverride: boolean("user_override").default(false),
+    /*
+     * The planned exercise this set stood in for, when the machine was taken or
+     * the movement was swapped.
+     *
+     * `exercise_id` always names the movement ACTUALLY performed, so weight
+     * history stays per-movement — logging a substitute must never teach the
+     * planned exercise a weight that belongs to something else. This column
+     * remembers the slot it was done in, which is what lets the app say "last
+     * week you did X here instead".
+     */
+    substitutedForExerciseId: varchar("substituted_for_exercise_id", { length: 36 }).references(
+      () => exercises.id,
+    ),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => ({
     workoutIdx: index("set_logs_workout_idx").on(table.workoutLogId),
     // Drives the autofill lookup: "what did I do on this exercise last time?"
     userExerciseIdx: index("set_logs_user_exercise_idx").on(table.userId, table.exerciseId),
+    // Drives "what did I actually do in this slot last time?"
+    substitutionIdx: index("set_logs_substituted_for_idx").on(
+      table.userId,
+      table.substitutedForExerciseId,
+    ),
   }),
 );
 
@@ -430,6 +448,16 @@ export const workoutCompleteSchema = z.object({
         isFailure: z.boolean().optional(),
         bandNote: z.string().max(500).nullable().optional(),
         cardioNotes: z.string().max(500).nullable().optional(),
+
+        /*
+         * A different movement was performed in this slot.
+         *
+         * `exerciseId` stays the PLANNED exercise so the server's day-ownership
+         * check still applies to it; the server then re-points the saved row at
+         * the substitute. Sending the substitute's id directly would mean
+         * accepting an arbitrary exercise id from the client.
+         */
+        substituteName: z.string().trim().min(1).max(120).nullable().optional(),
       }),
     )
     .max(500)
