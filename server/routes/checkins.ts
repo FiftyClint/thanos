@@ -6,6 +6,7 @@ import { requireAuth, userIdOf } from "../middleware/auth";
 import { asyncHandler, badRequest } from "../middleware/error";
 import { ownerOfKey } from "../files";
 import { syncCheckIn } from "../integrations/notion";
+import { activeSeason } from "../lib/season";
 
 export const checkInRouter = Router();
 
@@ -32,10 +33,12 @@ checkInRouter.post(
     const userId = userIdOf(req);
     // The original client wrapped the body in `{ data: ... }`; accept both.
     const data = checkInDataSchema.parse(req.body?.data ?? req.body);
+    const { season } = await activeSeason(userId);
 
     const values = {
       userId,
       week: data.week,
+      season,
       date: new Date(data.date),
       phase: data.phase,
       weightLbs: data.weightLbs ?? null,
@@ -61,7 +64,7 @@ checkInRouter.post(
 
     // One check-in per week: submitting again corrects that week rather than
     // adding a second row that then fights the first one on every chart.
-    const existing = await storage.getCheckInByWeek(userId, data.week);
+    const existing = await storage.getCheckInByWeek(userId, season, data.week);
     const checkIn = existing
       ? await storage.updateCheckIn(existing.id, values)
       : await storage.createCheckIn(values);
@@ -79,6 +82,7 @@ checkInRouter.post(
         filePath: photo.objectPath,
         poseType: photo.poseType,
         week: data.week,
+        season,
       });
     }
 

@@ -260,13 +260,31 @@ tests/             unit + API integration
 
 ### The training program
 
-Three blocks live in `server/seed/`, as plain data:
+Four blocks live in `server/seed/`, as plain data:
 
 | Block | Exercises | Focus |
 | --- | --- | --- |
 | Phase 1 — Base | 117 | 6-day split |
 | Phase 2 — Build | 66 (+ shared warm-ups/cool-downs) | push/pull/legs |
 | Phase 3 — Cut | 129 | 6-day specialization |
+| Phase 4 — Bulk | 16 weeks from 11/23/2026, 2027 season | 6-day split, legs + back width priority |
+
+### Seasons
+
+A week number is only an identity inside a **season** (`shared/seasons.ts`).
+Phases 1-3 are the 2026 season and count weeks from the Prep Start Date in
+Settings. Phase 4 is the 2027 season and counts from its own start, Monday
+11/23/2026. Every week-keyed row (workouts, check-ins, cardio, vacuum, photos,
+recommendations, deloads) stores its season, the unique keys include it, and
+every lookup by week is scoped to the active program's season. So a new cycle
+restarts at Week 1 without overwriting, or being confused with, the last one.
+Migration `0003_seasons` backfills all existing rows as 2026.
+
+Phase 4's weekly structure (`shared/bulk-rules.ts`) is applied at read time:
+Week 1 is re-entry at RIR 3, weeks 7-12 swap to the Block 2 exercises, and
+weeks 4-5, 10-11 and 15-16 add a set to the first lift on Mon, Tue, Thu and
+Fri. Deloads stay fatigue-triggered; because the bulk runs in a surplus, the
+cut-only "normal drift" confound check is off for it.
 
 Each exercise is keyed by `(program, day, order, number)`. Editing a row updates
 that exercise **in place**, so the sets you have already logged against it stay

@@ -9,7 +9,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient, wasQueued } from "@/lib/queryClient";
-import { getCurrentWeek, getCurrentPhase } from "@/lib/utils";
 import { usePrep } from "@/hooks/use-prep";
 import { Plus, Trash2, Wind, Loader2, Flame, CheckCircle2 } from "lucide-react";
 import { Link } from "wouter";
@@ -24,8 +23,7 @@ function formatSeconds(totalSecs: number): string {
 
 export default function VacuumPage() {
   const { toast } = useToast();
-  const { currentWeek } = usePrep();
-  const phase = getCurrentPhase(currentWeek);
+  const { currentWeek, phase } = usePrep();
   const today = new Date();
   
   const [showAddForm, setShowAddForm] = useState(false);

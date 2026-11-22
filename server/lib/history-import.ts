@@ -8,6 +8,7 @@
 import { db } from "../db";
 import { logger } from "../logger";
 import { exercises, workoutLogs, setLogs, type InsertSetLog } from "@shared/schema";
+import { seasonOf } from "@shared/seasons";
 import { eq, inArray } from "drizzle-orm";
 import {
   parseHistoryCsv,
@@ -79,7 +80,9 @@ export async function importHistory(options: ImportOptions): Promise<ImportRepor
   // ── Clashes ───────────────────────────────────────────────────────────────
   const existing = await db.select().from(workoutLogs).where(eq(workoutLogs.userId, userId));
   const sessionKeys = new Set(sessions.map((s) => `${s.week}|${s.day}`));
-  const clashing = existing.filter((w) => sessionKeys.has(`${w.week}|${w.day}`));
+  // Weeks restart each season, so only this season's sessions can clash.
+  const season = seasonOf(activeProgram);
+  const clashing = existing.filter((w) => w.season === season && sessionKeys.has(`${w.week}|${w.day}`));
 
   if (clashing.length > 0 && !replace && !dryRun) {
     throw new ImportConflictError(clashing.length);
@@ -189,6 +192,7 @@ export async function importHistory(options: ImportOptions): Promise<ImportRepor
         userId,
         day: session.day,
         week: session.week,
+        season,
         phase: session.phase,
         program: activeProgram,
         // Midday UTC, so the date cannot slide either way across a timezone.

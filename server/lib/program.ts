@@ -5,6 +5,7 @@
  * without a database. See tests/program.test.ts.
  */
 import type { Exercise } from "@shared/schema";
+import { bulkPhaseLabel, applyBulkRules } from "@shared/bulk-rules";
 
 /** Barbell/loaded-carry style lifts that move in bigger jumps than isolation work. */
 const COMPOUND_EXERCISES = [
@@ -69,8 +70,9 @@ export function parseRepRangeMin(repRange: string): number {
 // Deload rules live in shared/ so the client cannot drift from them again.
 export { isDeloadWeek, setsForWeek, SCHEDULED_DELOAD_WEEKS } from "@shared/program-rules";
 
-/** The 36-week prep macrocycle. */
-export function getCurrentPhase(week: number): string {
+/** Phase label for a week: the bulk's blocks for Phase 4, the prep macrocycle otherwise. */
+export function getCurrentPhase(week: number, program?: string | null): string {
+  if (program === "phase4") return bulkPhaseLabel(week);
   if (week <= 10) return "Base";
   if (week === 11) return "Diet Break 1";
   if (week >= 12 && week <= 21) return "Cut 1";
@@ -101,12 +103,14 @@ export function applyRampSets<T extends { notes: string | null; defaultSets: num
   return exercise;
 }
 
-/** Ramp notes only apply to the Phase 3 program. */
-export function applyProgramRules<T extends { notes: string | null; defaultSets: number }>(
-  exercises: T[],
-  program: string,
-  week: number,
-): T[] {
+/** Ramp notes apply to Phase 3; Phase 4 has its own block rules. */
+export function applyProgramRules<
+  T extends { notes: string | null; defaultSets: number; rir?: string; segment?: string },
+>(exercises: T[], program: string, week: number): T[] {
+  if (program === "phase4") return applyBulkRules(exercises, week);
   if (program !== "phase3") return exercises;
   return exercises.map((e) => applyRampSets(e, week));
 }
+
+// Phase 4 (bulk) rules live in shared/ so the client labels weeks the same way.
+export { bulkPhaseLabel, applyBulkRules };

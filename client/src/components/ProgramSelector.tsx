@@ -5,6 +5,7 @@ import { useToast } from "@/hooks/use-toast";
 import type { User } from "@shared/schema";
 
 const PROGRAMS = [
+  { value: "phase4", label: "Phase 4 — Bulk (2027)" },
   { value: "phase3", label: "Phase 3 — Cut" },
   { value: "phase2", label: "Phase 2 — Build" },
   { value: "phase1", label: "Phase 1 — Enhance" },
@@ -24,6 +25,8 @@ export default function ProgramSelector() {
       );
       queryClient.invalidateQueries({ queryKey: ["/api/exercises"] });
       queryClient.invalidateQueries({ queryKey: ["/api/sets/recommendations"] });
+      // Week numbers and seasons follow the program, so every week-scoped view refreshes.
+      queryClient.invalidateQueries();
       toast({
         title: "Program switched",
         description: PROGRAMS.find(p => p.value === program)?.label,

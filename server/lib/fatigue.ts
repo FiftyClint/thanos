@@ -389,6 +389,13 @@ function buildReductionPlan(triggers: FiredTrigger[]): string[] {
 export interface AssessOptions {
   /** A Tier 1 trim was actioned and its trigger still fires — escalates to Tier 2. */
   tier1Actioned?: { trigger: TriggerId; subject?: string; actionedAt: Date } | null;
+  /**
+   * Whether the athlete is dieting. The confound check exists because some
+   * decline is expected in a deficit; in a surplus (a bulk) there is nothing
+   * to confound, so a Tier 2 trigger is called as a Tier 2. Defaults to the
+   * cut behaviour the RULES sheet was written for.
+   */
+  energyBalance?: "deficit" | "surplus";
 }
 
 /**
@@ -474,7 +481,7 @@ export function assessFatigue(
   unevaluated.push("Resting HR is not tracked by this app — the 'RHR elevated 7+ days' hard stop cannot fire.");
 
   const hardStops = checkHardStops(sessions);
-  const confound = assessConfound(triggers, sessions);
+  const confound = options.energyBalance === "surplus" ? null : assessConfound(triggers, sessions);
 
   let verdict: Verdict = "clear";
   if (hardStops.length > 0) verdict = "hard_stop";

@@ -39,6 +39,7 @@ import {
   vacuumSessions,
 } from "@shared/schema";
 import { eq, and, sql } from "drizzle-orm";
+import { LEGACY_SEASON } from "@shared/seasons";
 
 /** Program id used for exercises that no longer exist in the seed files. */
 const LEGACY_PROGRAM = "legacy";
@@ -372,6 +373,7 @@ async function main(): Promise<void> {
             day: old.day as number,
             date: new Date(old.date as string),
             week: old.week as number,
+            season: LEGACY_SEASON,
             phase: (old.phase as string) ?? "",
             program: (old.program as string) ?? "phase3",
             duration: old.duration as number | null,
@@ -447,6 +449,7 @@ async function main(): Promise<void> {
       await db.insert(weeklyCheckIns).values({
         userId: targetUserId,
         week: c.week as number,
+        season: LEGACY_SEASON,
         date: new Date(c.date as string),
         phase: (c.phase as string) ?? "",
         weightLbs: c.weight_lbs as number | null,
@@ -482,6 +485,7 @@ async function main(): Promise<void> {
         userId: targetUserId,
         date: new Date(s.date as string),
         week: s.week as number,
+        season: LEGACY_SEASON,
         type: s.type as string,
         subtype: s.subtype as string | null,
         durationMin: s.duration_min as number,
@@ -499,6 +503,7 @@ async function main(): Promise<void> {
         userId: targetUserId,
         date: new Date(s.date as string),
         week: s.week as number,
+        season: LEGACY_SEASON,
         timeOfDay: s.time_of_day as string,
         sets: s.sets as number,
         durationSec: s.duration_sec as number,
@@ -519,6 +524,7 @@ async function main(): Promise<void> {
         message: r.message as string,
         details: (r.details as string) ?? "",
         week: r.week as number,
+        season: LEGACY_SEASON,
         status: (r.status as string) ?? "pending",
       });
     }

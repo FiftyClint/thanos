@@ -6,6 +6,7 @@ import {
   listQuerySchema,
 } from "@shared/schema";
 import { storage } from "../storage";
+import { activeSeason } from "../lib/season";
 import { requireAuth, userIdOf } from "../middleware/auth";
 import { asyncHandler, notFound } from "../middleware/error";
 
@@ -22,7 +23,10 @@ conditioningRouter.get(
   requireAuth,
   asyncHandler(async (req, res) => {
     const { week, type } = listQuerySchema.parse(req.query);
-    res.json(await storage.getCardioSessionsByUser(userIdOf(req), week, type));
+    const userId = userIdOf(req);
+    // A week is scoped to the current season; with no week, every season.
+    const scope = week ? { season: (await activeSeason(userId)).season, week } : undefined;
+    res.json(await storage.getCardioSessionsByUser(userId, scope, type));
   }),
 );
 
@@ -31,10 +35,13 @@ conditioningRouter.post(
   requireAuth,
   asyncHandler(async (req, res) => {
     const data = cardioSessionRequestSchema.parse(req.body);
+    const userId = userIdOf(req);
+    const { season } = await activeSeason(userId);
     const session = await storage.createCardioSession({
-      userId: userIdOf(req),
+      userId,
       date: new Date(data.date),
       week: data.week,
+      season,
       type: data.type,
       // A subtype only means something for LISS.
       subtype: data.type === "LISS" ? (data.subtype ?? null) : null,
@@ -66,9 +73,10 @@ conditioningRouter.get(
     const { week } = listQuerySchema.parse(req.query);
     const userId = userIdOf(req);
 
-    // Stats are computed over the whole history; `week` selects which week the
-    // goal and streak are measured against.
-    const sessions = await storage.getCardioSessionsByUser(userId);
+    // Stats are computed over the current season's history; `week` selects
+    // which week the goal and streak are measured against. Week numbers repeat
+    // across seasons, so mixing seasons would count two weeks as one.
+    const sessions = await storage.getCardioSessionsByUser(userId, { season: (await activeSeason(userId)).season });
 
     const byWeek = new Map<number, number>();
     for (const s of sessions) byWeek.set(s.week, (byWeek.get(s.week) ?? 0) + 1);
@@ -105,7 +113,9 @@ conditioningRouter.get(
   requireAuth,
   asyncHandler(async (req, res) => {
     const { week, timeOfDay } = listQuerySchema.parse(req.query);
-    res.json(await storage.getVacuumSessionsByUser(userIdOf(req), week, timeOfDay));
+    const userId = userIdOf(req);
+    const scope = week ? { season: (await activeSeason(userId)).season, week } : undefined;
+    res.json(await storage.getVacuumSessionsByUser(userId, scope, timeOfDay));
   }),
 );
 
@@ -114,10 +124,13 @@ conditioningRouter.post(
   requireAuth,
   asyncHandler(async (req, res) => {
     const data = vacuumSessionRequestSchema.parse(req.body);
+    const userId = userIdOf(req);
+    const { season } = await activeSeason(userId);
     const session = await storage.createVacuumSession({
-      userId: userIdOf(req),
+      userId,
       date: new Date(data.date),
       week: data.week,
+      season,
       timeOfDay: data.timeOfDay,
       sets: data.sets,
       durationSec: data.durationSec,
