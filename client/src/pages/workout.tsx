@@ -12,7 +12,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient, wasQueued } from "@/lib/queryClient";
-import { getCurrentWeek, getCurrentPhase, getDayName, getDayFocus, formatTime, parseRestSeconds, isDeloadWeek } from "@/lib/utils";
+import { getDayName, getDayFocus, formatTime, parseRestSeconds } from "@/lib/utils";
+import { setsForDeload } from "@shared/program-rules";
 import { usePrep } from "@/hooks/use-prep";
 import { SessionCheck, EMPTY_SESSION_CHECK, type SessionCheckValue } from "@/components/SessionCheck";
 import ProgramSelector from "@/components/ProgramSelector";
@@ -307,9 +308,15 @@ export default function Workout() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   
-  const { currentWeek } = usePrep();
-  const phase = getCurrentPhase(currentWeek);
-  const isDeload = isDeloadWeek(currentWeek);
+  const { currentWeek, phase } = usePrep();
+  /*
+   * Volume follows an ACTIVE full (Tier 2) deload, the same rule the server's
+   * weight recommendations use. This used to be the calendar (weeks 4, 8, 16,
+   * 24, 32), which the server had already stopped using, so the screen could
+   * cut sets the recommendations still expected.
+   */
+  const { data: fatigue } = useQuery<{ activeDeload: { tier: number } | null }>({ queryKey: ["/api/fatigue"] });
+  const isDeload = fatigue?.activeDeload?.tier === 2;
   
   const [expandedExercises, setExpandedExercises] = useState<Set<string>>(new Set());
   const [exerciseData, setExerciseData] = useState<Map<string, SetData[]>>(new Map());
@@ -410,7 +417,7 @@ export default function Workout() {
     if (exercises && exercises.length > 0 && !exerciseData.size && recommendationsFetched) {
       const newData = new Map<string, SetData[]>();
       exercises.forEach((ex) => {
-        const numSets = isDeload ? Math.max(2, ex.defaultSets - (ex.defaultSets > 3 ? 2 : 1)) : ex.defaultSets;
+        const numSets = isDeload ? setsForDeload(ex.defaultSets) : ex.defaultSets;
         const sets: SetData[] = [];
         
         const exRecs = (weightRecommendations && weightRecommendations[ex.id]) || [];
@@ -938,7 +945,7 @@ export default function Workout() {
           {isDeload && (
             <div className="mt-3 flex items-center gap-2 text-warning">
               <AlertTriangle className="w-4 h-4" />
-              <span className="text-sm font-medium">DELOAD WEEK — Reduced volume</span>
+              <span className="text-sm font-medium">DELOAD ACTIVE — Reduced volume</span>
             </div>
           )}
         </div>

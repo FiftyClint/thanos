@@ -1,5 +1,7 @@
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
+import { bulkPhaseLabel } from "@shared/bulk-rules"
+import { programWeek } from "@shared/seasons"
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -16,11 +18,9 @@ export function cn(...inputs: ClassValue[]) {
 export const PREP_START_DATE = new Date("2026-02-01");
 export const SHOW_DATE = new Date("2026-11-14");
 
-/** Week of prep, counting the first week as 1. */
+/** Week of prep (Phases 1-3), counting the first week as 1. Prefer usePrep(), which is program-aware. */
 export function getCurrentWeek(prepStartDate?: Date | string | null): number {
-  const start = toDate(prepStartDate) ?? PREP_START_DATE;
-  const diffDays = Math.ceil((Date.now() - start.getTime()) / (1000 * 60 * 60 * 24));
-  return Math.max(1, Math.ceil(diffDays / 7));
+  return programWeek("phase3", prepStartDate);
 }
 
 export function getDaysUntilShow(showDate?: Date | string | null): number {
@@ -34,7 +34,8 @@ function toDate(value: Date | string | null | undefined): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-export function getCurrentPhase(weekNumber: number): string {
+export function getCurrentPhase(weekNumber: number, program?: string | null): string {
+  if (program === "phase4") return bulkPhaseLabel(weekNumber);
   if (weekNumber <= 10) return "Base";
   if (weekNumber === 11) return "Diet Break 1";
   if (weekNumber >= 12 && weekNumber <= 21) return "Cut 1";
@@ -55,6 +56,17 @@ export function getPhaseColor(phase: string): string {
       return "bg-yellow-600";
     case "Peak":
       return "bg-red-600";
+    case "Re-entry":
+      return "bg-slate-600";
+    case "Block 1 Build":
+    case "Block 1 Build +":
+      return "bg-blue-600";
+    case "Block 2 Build":
+    case "Block 2 Build +":
+      return "bg-purple-600";
+    case "Block 3 Build":
+    case "Block 3 Build +":
+      return "bg-orange-600";
     default:
       return "bg-gray-600";
   }
@@ -76,6 +88,17 @@ export function getDayName(day: number): string {
 }
 
 export function getDayFocus(day: number, program?: string): string {
+  if (program === 'phase4') {
+    const focuses: Record<number, string> = {
+      1: "Legs A (Quads)",
+      2: "Back A (Width)",
+      3: "Chest + Delts + Triceps",
+      4: "Legs B (Posterior + Quads)",
+      5: "Back B (Width + Thickness)",
+      6: "Delts + Upper Chest + Arms",
+    };
+    return focuses[day] || "";
+  }
   if (program === 'phase3') {
     const focuses: Record<number, string> = {
       1: "Side Delts + Triceps",

@@ -9,7 +9,7 @@ import { Slider } from "@/components/ui/slider";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient, wasQueued } from "@/lib/queryClient";
-import { getCurrentWeek, getCurrentPhase, calculateShoulderToWaist } from "@/lib/utils";
+import { calculateShoulderToWaist } from "@/lib/utils";
 import { usePrep } from "@/hooks/use-prep";
 import { Scale, Ruler, Brain, Camera, Loader2, CheckCircle2 } from "lucide-react";
 
@@ -40,8 +40,7 @@ async function uploadPhotoToStorage(file: File): Promise<string> {
 export default function CheckIn() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
-  const { currentWeek } = usePrep();
-  const phase = getCurrentPhase(currentWeek);
+  const { currentWeek, phase } = usePrep();
 
   const [measurements, setMeasurements] = useState({
     weightLbs: "",

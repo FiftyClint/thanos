@@ -4,15 +4,17 @@ import { logger } from "../logger";
 import { phase1Exercises } from "./phase1";
 import { phase2Exercises } from "./phase2";
 import { phase3Exercises } from "./phase3";
+import { phase4Exercises } from "./phase4";
 
-export type ProgramId = "phase1" | "phase2" | "phase3";
+export type ProgramId = "phase1" | "phase2" | "phase3" | "phase4";
 
-export const PROGRAM_IDS: ProgramId[] = ["phase1", "phase2", "phase3"];
+export const PROGRAM_IDS: ProgramId[] = ["phase1", "phase2", "phase3", "phase4"];
 
 export const PROGRAM_LABELS: Record<ProgramId, string> = {
   phase1: "Phase 1 — Base Block",
   phase2: "Phase 2 — Build Block",
   phase3: "Phase 3 — Cut Block",
+  phase4: "Phase 4 — Bulk Block (2027 season)",
 };
 
 /** Phase 2 defines its own working sets but reuses the Phase 1 warm-up/cool-down blocks. */
@@ -24,6 +26,7 @@ export const PROGRAMS: Record<ProgramId, InsertExercise[]> = {
   phase1: phase1Exercises.map((e) => ({ ...e, program: "phase1" })),
   phase2: [...phase2Exercises, ...phase1WarmupCooldown].map((e) => ({ ...e, program: "phase2" })),
   phase3: phase3Exercises.map((e) => ({ ...e, program: "phase3" })),
+  phase4: phase4Exercises.map((e) => ({ ...e, program: "phase4" })),
 };
 
 /** Identity of an exercise row within a program. Stable across content edits. */

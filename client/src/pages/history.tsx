@@ -94,7 +94,7 @@ export default function HistoryPage() {
                   </div>
                 </div>
                 <div className="flex flex-col items-end gap-1">
-                  <Badge variant="secondary">Week {workout.week}</Badge>
+                  <Badge variant="secondary">Week {workout.week} · {workout.season}</Badge>
                   {workout.duration && (
                     <div className="flex items-center gap-1 text-xs text-muted-foreground">
                       <Clock className="w-3 h-3" />

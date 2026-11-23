@@ -327,7 +327,7 @@ export default function CheckInHistory() {
             <div className="space-y-3">
               <h2 className="text-lg font-semibold">All Check-Ins</h2>
               {sortedCheckIns.map((checkIn) => (
-                <Card key={checkIn.id} className="hover-elevate cursor-pointer" data-testid={`card-checkin-${checkIn.week}`}>
+                <Card key={checkIn.id} className="hover-elevate cursor-pointer" data-testid={`card-checkin-${checkIn.season}-${checkIn.week}`}>
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-4">
@@ -335,7 +335,7 @@ export default function CheckInHistory() {
                           <span className="text-lg font-bold text-white">{checkIn.week}</span>
                         </div>
                         <div>
-                          <div className="font-semibold">Week {checkIn.week}</div>
+                          <div className="font-semibold">Week {checkIn.week} · {checkIn.season}</div>
                           <div className="text-sm text-muted-foreground">
                             {new Date(checkIn.date).toLocaleDateString()} • {checkIn.phase}
                           </div>

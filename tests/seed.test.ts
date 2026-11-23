@@ -3,6 +3,7 @@ import { PROGRAMS, PROGRAM_IDS } from "../server/seed";
 import { phase1Exercises } from "../server/seed/phase1";
 import { phase2Exercises } from "../server/seed/phase2";
 import { phase3Exercises } from "../server/seed/phase3";
+import { phase4Exercises } from "../server/seed/phase4";
 import { SEGMENTS } from "@shared/schema";
 
 /**
@@ -17,6 +18,7 @@ describe("program content", () => {
     expect(phase1Exercises).toHaveLength(117);
     expect(phase2Exercises).toHaveLength(66);
     expect(phase3Exercises).toHaveLength(129);
+    expect(phase4Exercises.length).toBeGreaterThan(0);
   });
 
   it("reuses the Phase 1 warm-ups and cool-downs for Phase 2", () => {

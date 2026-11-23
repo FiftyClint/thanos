@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import type { PublicUser } from "@shared/schema";
-import { getCurrentWeek, getDaysUntilShow, getCurrentPhase } from "@/lib/utils";
+import { getDaysUntilShow, getCurrentPhase } from "@/lib/utils";
+import { programWeek, seasonOf } from "@shared/seasons";
 
 /**
  * Where the prep is, according to the athlete's own dates.
@@ -12,13 +13,17 @@ import { getCurrentWeek, getDaysUntilShow, getCurrentPhase } from "@/lib/utils";
 export function usePrep() {
   const { data: user } = useQuery<PublicUser | null>({ queryKey: ["/api/user"] });
 
-  const currentWeek = getCurrentWeek(user?.prepStartDate);
+  const program = user?.activeProgram ?? "phase3";
+  // Week of the ACTIVE program: Phase 4 counts from its own start (11/23/2026)
+  // in the 2027 season; Phases 1-3 count from the Prep Start Date.
+  const currentWeek = programWeek(program, user?.prepStartDate);
   const daysUntilShow = getDaysUntilShow(user?.showDate);
 
   return {
     currentWeek,
     daysUntilShow,
-    phase: getCurrentPhase(currentWeek),
+    phase: getCurrentPhase(currentWeek, program),
+    season: seasonOf(program),
     /** True once the athlete has set their own dates rather than using defaults. */
     usingOwnDates: Boolean(user?.prepStartDate || user?.showDate),
     showDate: user?.showDate ?? null,

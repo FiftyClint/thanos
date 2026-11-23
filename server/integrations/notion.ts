@@ -2,6 +2,7 @@ import { Client } from "@notionhq/client";
 import type { WorkoutLog, WeeklyCheckIn } from "@shared/schema";
 import { env, notionEnabled } from "../env";
 import { logger } from "../logger";
+import { seasonLabel } from "@shared/seasons";
 
 /**
  * Optional mirror of training data into Notion. Postgres stays the source of
@@ -19,6 +20,7 @@ const DB = {
   dailyVitals: () => env.NOTION_DB_DAILY_VITALS,
 };
 
+/** Notion "Day Type" for the original split, which Phases 1-3 still report under. */
 const DAY_TYPE: Record<number, string> = {
   1: "Delts + Triceps",
   2: "Lat Width + Biceps",
@@ -27,6 +29,21 @@ const DAY_TYPE: Record<number, string> = {
   5: "Back Thickness + Rear Delts + Arms",
   6: "Legs",
 };
+
+/** Phase 4 has its own split; Notion creates these select options on first use. */
+const PHASE4_DAY_TYPE: Record<number, string> = {
+  1: "Legs A (Quads)",
+  2: "Back A (Width)",
+  3: "Chest + Delts + Triceps",
+  4: "Legs B (Posterior + Quads)",
+  5: "Back B (Width + Thickness)",
+  6: "Delts + Upper Chest + Arms",
+};
+
+function dayTypeFor(workoutLog: WorkoutLog): string {
+  const table = workoutLog.program === "phase4" ? PHASE4_DAY_TYPE : DAY_TYPE;
+  return table[workoutLog.day] ?? "Cardio Only";
+}
 
 let client: Client | null = null;
 
@@ -77,7 +94,11 @@ export async function syncTrainingSession(workoutLog: WorkoutLog): Promise<void>
   if (!getClient() || !databaseId) return;
 
   const dateStr = isoDay(new Date(workoutLog.date));
-  const dayType = DAY_TYPE[workoutLog.day] ?? "Cardio Only";
+  const dayType = dayTypeFor(workoutLog);
+  // The season and week go in the notes, so a Week 1 in 2027 is never read as
+  // the Week 1 of the 2026 prep.
+  const header = `${seasonLabel(workoutLog.season)} · Week ${workoutLog.week} · ${workoutLog.phase}`;
+  const notes = workoutLog.notes ? `${header}\n${workoutLog.notes}` : header;
   const title = `${dayType} - ${dateStr}`;
 
   await upsertByTitle(databaseId, "Session", title, {
@@ -85,7 +106,7 @@ export async function syncTrainingSession(workoutLog: WorkoutLog): Promise<void>
     Date: { date: { start: dateStr } },
     "Day Type": { select: select(dayType) },
     "Duration (min)": num(workoutLog.duration),
-    Notes: { rich_text: richText(workoutLog.notes) },
+    Notes: { rich_text: richText(notes) },
   });
 }
 

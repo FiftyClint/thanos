@@ -15,7 +15,7 @@ import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { JOINT_STATUSES, WARMUP_FEELS, PUMP_QUALITIES } from "./program-rules";
 
-export const PROGRAMS = ["phase1", "phase2", "phase3"] as const;
+export const PROGRAMS = ["phase1", "phase2", "phase3", "phase4"] as const;
 export const SEGMENTS = ["warmup", "working", "finisher", "cooldown"] as const;
 export const CARDIO_TYPES = ["HIIT", "LISS"] as const;
 export const CARDIO_SUBTYPES = ["Walking", "Incline Treadmill", "Ruck"] as const;
@@ -102,6 +102,8 @@ export const workoutLogs = pgTable(
     day: integer("day").notNull(),
     date: timestamp("date").notNull(),
     week: integer("week").notNull(),
+    /** Which cycle the week belongs to; see shared/seasons.ts. Always set explicitly. */
+    season: integer("season").notNull(),
     phase: text("phase").notNull(),
     program: text("program").notNull().default("phase3"),
     duration: integer("duration"), // minutes
@@ -128,7 +130,12 @@ export const workoutLogs = pgTable(
   (table) => ({
     // At most one log per user/day/week — enforced here rather than only in code,
     // so a double submit from a flaky gym connection cannot create a duplicate.
-    userDayWeekIdx: uniqueIndex("workout_logs_user_day_week_idx").on(table.userId, table.day, table.week),
+    userDayWeekIdx: uniqueIndex("workout_logs_user_season_day_week_idx").on(
+      table.userId,
+      table.season,
+      table.day,
+      table.week,
+    ),
     userDateIdx: index("workout_logs_user_date_idx").on(table.userId, table.date),
   }),
 );
@@ -194,6 +201,8 @@ export const weeklyCheckIns = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     week: integer("week").notNull(),
+    /** Which cycle the week belongs to; see shared/seasons.ts. Always set explicitly. */
+    season: integer("season").notNull(),
     date: timestamp("date").notNull(),
     phase: text("phase").notNull(),
     weightLbs: real("weight_lbs"),
@@ -219,7 +228,7 @@ export const weeklyCheckIns = pgTable(
   },
   (table) => ({
     // One check-in per week; a re-submit updates rather than duplicating.
-    userWeekIdx: uniqueIndex("weekly_check_ins_user_week_idx").on(table.userId, table.week),
+    userWeekIdx: uniqueIndex("weekly_check_ins_user_season_week_idx").on(table.userId, table.season, table.week),
   }),
 );
 
@@ -237,6 +246,8 @@ export const progressPhotos = pgTable(
     filePath: text("file_path").notNull(),
     poseType: text("pose_type").notNull(),
     week: integer("week").notNull(),
+    /** Which cycle the week belongs to; see shared/seasons.ts. Always set explicitly. */
+    season: integer("season").notNull(),
     date: timestamp("date").defaultNow().notNull(),
   },
   (table) => ({
@@ -257,6 +268,8 @@ export const recommendations = pgTable(
     message: text("message").notNull(),
     details: text("details").default(""),
     week: integer("week").notNull(),
+    /** Which cycle the week belongs to; see shared/seasons.ts. Always set explicitly. */
+    season: integer("season").notNull(),
     status: text("status").notNull().default("pending"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
@@ -276,6 +289,8 @@ export const cardioSessions = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     date: timestamp("date").notNull(),
     week: integer("week").notNull(),
+    /** Which cycle the week belongs to; see shared/seasons.ts. Always set explicitly. */
+    season: integer("season").notNull(),
     type: text("type").notNull(),
     subtype: text("subtype"),
     durationMin: integer("duration_min").notNull(),
@@ -298,6 +313,8 @@ export const vacuumSessions = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     date: timestamp("date").notNull(),
     week: integer("week").notNull(),
+    /** Which cycle the week belongs to; see shared/seasons.ts. Always set explicitly. */
+    season: integer("season").notNull(),
     timeOfDay: text("time_of_day").notNull(),
     sets: integer("sets").notNull(),
     durationSec: integer("duration_sec").notNull(),
@@ -333,6 +350,8 @@ export const deloadEvents = pgTable(
     /** The triggers that fired, with their evidence, as recorded at the time. */
     triggers: jsonb("triggers").default([]),
     week: integer("week").notNull(),
+    /** Which cycle the week belongs to; see shared/seasons.ts. Always set explicitly. */
+    season: integer("season").notNull(),
     recommendedAt: timestamp("recommended_at").defaultNow().notNull(),
     startedAt: timestamp("started_at"),
     endedAt: timestamp("ended_at"),

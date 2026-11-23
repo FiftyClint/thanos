@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getCurrentWeek, getDaysUntilShow, getCurrentPhase, getPhaseColor, getDayName, getDayFocus } from "@/lib/utils";
+import { getPhaseColor, getDayName, getDayFocus } from "@/lib/utils";
 import { Calendar, Dumbbell, CheckCircle2, Circle, TrendingUp, AlertTriangle, Scale, Check, X, Activity, Wind, Plus, Flame } from "lucide-react";
 import type { WorkoutLog, WeeklyCheckIn, Recommendation, CardioSession, VacuumSession, User } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -14,11 +14,10 @@ import { FatigueStatus } from "@/components/FatigueStatus";
 
 export default function Dashboard() {
   const { toast } = useToast();
-  const { currentWeek, daysUntilShow } = usePrep();
-  const phase = getCurrentPhase(currentWeek);
+  const { currentWeek, daysUntilShow, phase } = usePrep();
 
   const { data: user } = useQuery<User | null>({ queryKey: ["/api/user"] });
-  const activeProgram = user?.activeProgram || 'phase2';
+  const activeProgram = user?.activeProgram || 'phase3';
 
   const { data: workoutLogs, isLoading: workoutsLoading } = useQuery<WorkoutLog[]>({
     queryKey: ["/api/workouts", currentWeek],

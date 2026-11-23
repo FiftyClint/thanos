@@ -141,6 +141,51 @@ suite("API", () => {
     });
   });
 
+  describe("seasons", () => {
+    it("keeps Week 1 of the 2027 bulk separate from Week 1 of the 2026 prep", async () => {
+      const user = await createUser(app);
+      const prepExercise = await firstWorkingExerciseId(app, user);
+      await user.agent
+        .post("/api/workouts/complete")
+        .send({ day: 1, week: 1, sets: [{ exerciseId: prepExercise, setNumber: 1, weightLbs: 135, reps: 10 }] })
+        .expect(200);
+
+      await user.agent.put("/api/user/program").send({ program: "phase4" }).expect(200);
+      const bulkExercise = await firstWorkingExerciseId(app, user);
+      const bulk = await user.agent
+        .post("/api/workouts/complete")
+        .send({ day: 1, week: 1, sets: [{ exerciseId: bulkExercise, setNumber: 1, weightLbs: 315, reps: 8 }] })
+        .expect(200);
+      expect(bulk.body.season).toBe(2027);
+      expect(bulk.body.phase).toBe("Re-entry");
+
+      // Both sessions survive; the bulk did not overwrite the prep.
+      const history = await user.agent.get("/api/workouts/history").expect(200);
+      expect(history.body.map((w: { season: number }) => w.season).sort()).toEqual([2026, 2027]);
+      const prep = history.body.find((w: { season: number }) => w.season === 2026);
+      expect(prep.sets[0].weightLbs).toBe(135);
+
+      // A week lookup is scoped to the active program's season.
+      const current = await user.agent.get("/api/workouts/current/1/1").expect(200);
+      expect(current.body.id).toBe(bulk.body.id);
+      const thisWeek = await user.agent.get("/api/workouts?week=1").expect(200);
+      expect(thisWeek.body).toHaveLength(1);
+
+      await user.agent.put("/api/user/program").send({ program: "phase3" }).expect(200);
+      const back = await user.agent.get("/api/workouts/current/1/1").expect(200);
+      expect(back.body.id).toBe(prep.id);
+    });
+
+    it("files a check-in under the active season", async () => {
+      const user = await createUser(app);
+      const body = { week: 1, date: "2026-11-23", phase: "Re-entry", weightLbs: 222 };
+      await user.agent.post("/api/checkins").send({ ...body, phase: "Base", weightLbs: 240 }).expect(201);
+      await user.agent.put("/api/user/program").send({ program: "phase4" }).expect(200);
+      const res = await user.agent.post("/api/checkins").send(body).expect(201);
+      expect(res.body.season).toBe(2027);
+    });
+  });
+
   describe("workouts", () => {
     it("saves a session and its sets", async () => {
       const user = await createUser(app);

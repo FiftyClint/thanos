@@ -6,6 +6,7 @@ import {
   weekParamSchema,
   listQuerySchema,
   MAX_WEEK,
+  PROGRAMS,
   type InsertSetLog,
   type WorkoutLog,
   type Exercise,
@@ -25,6 +26,8 @@ import {
 } from "../lib/substitutions";
 import { analyseExercisePerformance, groupSetsByExercise } from "../lib/progressionAnalysis";
 import { syncTrainingSession } from "../integrations/notion";
+import { activeSeason } from "../lib/season";
+import { seasonOf } from "@shared/seasons";
 
 export const workoutRouter = Router();
 
@@ -40,7 +43,7 @@ workoutRouter.get(
   requireAuth,
   asyncHandler(async (req, res) => {
     // Was public before; the program content is the user's own, so it needs auth.
-    const program = z.enum(["phase1", "phase2", "phase3"]).optional().parse(req.query.program);
+    const program = z.enum(PROGRAMS).optional().parse(req.query.program);
     res.json(await storage.getAllExercises(program ?? (await activeProgram(userIdOf(req)))));
   }),
 );
@@ -66,7 +69,10 @@ workoutRouter.get(
   requireAuth,
   asyncHandler(async (req, res) => {
     const { week } = listQuerySchema.parse(req.query);
-    res.json(await storage.getWorkoutLogsByUser(userIdOf(req), week));
+    const userId = userIdOf(req);
+    // A week is only meaningful inside a season; without one, every season.
+    const scope = week ? { season: (await activeSeason(userId)).season, week } : undefined;
+    res.json(await storage.getWorkoutLogsByUser(userId, scope));
   }),
 );
 
@@ -87,7 +93,9 @@ workoutRouter.get(
   asyncHandler(async (req, res) => {
     const { day } = dayParamSchema.parse(req.params);
     const { week } = weekParamSchema.parse({ week: req.params.week });
-    res.json((await storage.getCurrentWorkoutLog(userIdOf(req), day, week)) ?? null);
+    const userId = userIdOf(req);
+    const { season } = await activeSeason(userId);
+    res.json((await storage.getCurrentWorkoutLog(userId, season, day, week)) ?? null);
   }),
 );
 
@@ -99,6 +107,8 @@ workoutRouter.post(
       workoutCompleteSchema.parse(req.body);
     const userId = userIdOf(req);
     const resolvedProgram = program ?? (await activeProgram(userId));
+    // The season follows the program the session was logged under.
+    const season = seasonOf(resolvedProgram);
 
     // Only accept sets for exercises that belong to this day's program. Without
     // this a client could attribute sets to any exercise id it liked.
@@ -110,7 +120,7 @@ workoutRouter.post(
       logger.warn({ userId, day, rejected }, "dropped sets referencing exercises outside this day");
     }
 
-    let workoutLog = await storage.getCurrentWorkoutLog(userId, day, week);
+    let workoutLog = await storage.getCurrentWorkoutLog(userId, season, day, week);
     if (workoutLog) {
       workoutLog = await storage.updateWorkoutLog(workoutLog.id, {
         completed: true,
@@ -132,7 +142,8 @@ workoutRouter.post(
         userId,
         day,
         week,
-        phase: phase ?? getCurrentPhase(week),
+        season,
+        phase: phase ?? getCurrentPhase(week, resolvedProgram),
         program: resolvedProgram,
         date: new Date(),
         duration: duration ?? null,
@@ -198,7 +209,7 @@ workoutRouter.post(
       const forAnalysis = acceptedSets.map((s, i) => ({ ...s, exerciseId: rows[i].exerciseId }));
       const analysisExercises = new Map(exerciseById);
       for (const substitute of substitutes.values()) analysisExercises.set(substitute.id, substitute);
-      await generateRecommendations(userId, week, day, forAnalysis, analysisExercises);
+      await generateRecommendations(userId, season, week, day, forAnalysis, analysisExercises);
     }
 
     res.json(workoutLog);
@@ -218,6 +229,7 @@ async function mirrorToNotion(workoutLog: WorkoutLog): Promise<void> {
 /** Compare this session against the last one and record any coaching cues. */
 async function generateRecommendations(
   userId: string,
+  season: number,
   week: number,
   day: number,
   sets: Array<{ exerciseId: string; setNumber: number; weightLbs?: number | null; reps?: number | null; rirActual?: number | null }>,
@@ -241,6 +253,7 @@ async function generateRecommendations(
         message: verdict.message,
         details: verdict.details,
         week,
+        season,
         status: "pending",
       });
     }

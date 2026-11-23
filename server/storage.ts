@@ -40,8 +40,9 @@ export interface IStorage {
 
   // Workout Logs
   getWorkoutLog(id: string): Promise<WorkoutLog | undefined>;
-  getWorkoutLogsByUser(userId: string, week?: number): Promise<WorkoutLog[]>;
-  getCurrentWorkoutLog(userId: string, day: number, week: number): Promise<WorkoutLog | undefined>;
+  /** A week number means nothing without its season, so `week` requires `season`. */
+  getWorkoutLogsByUser(userId: string, scope?: { season: number; week?: number }): Promise<WorkoutLog[]>;
+  getCurrentWorkoutLog(userId: string, season: number, day: number, week: number): Promise<WorkoutLog | undefined>;
   createWorkoutLog(log: InsertWorkoutLog): Promise<WorkoutLog>;
   updateWorkoutLog(id: string, updates: Partial<WorkoutLog>): Promise<WorkoutLog>;
 
@@ -55,7 +56,7 @@ export interface IStorage {
   // Weekly Check-Ins
   getCheckInsByUser(userId: string): Promise<WeeklyCheckIn[]>;
   getLatestCheckIn(userId: string): Promise<WeeklyCheckIn | undefined>;
-  getCheckInByWeek(userId: string, week: number): Promise<WeeklyCheckIn | undefined>;
+  getCheckInByWeek(userId: string, season: number, week: number): Promise<WeeklyCheckIn | undefined>;
   createCheckIn(checkIn: InsertWeeklyCheckIn): Promise<WeeklyCheckIn>;
   updateCheckIn(id: string, updates: Partial<WeeklyCheckIn>): Promise<WeeklyCheckIn>;
 
@@ -71,13 +72,13 @@ export interface IStorage {
   updateRecommendation(id: string, status: string): Promise<Recommendation>;
 
   // Cardio Sessions
-  getCardioSessionsByUser(userId: string, week?: number, type?: string): Promise<CardioSession[]>;
+  getCardioSessionsByUser(userId: string, scope?: { season: number; week?: number }, type?: string): Promise<CardioSession[]>;
   getCardioSession(id: string): Promise<CardioSession | undefined>;
   createCardioSession(session: InsertCardioSession): Promise<CardioSession>;
   deleteCardioSession(id: string): Promise<void>;
 
   // Vacuum Sessions
-  getVacuumSessionsByUser(userId: string, week?: number, timeOfDay?: string): Promise<VacuumSession[]>;
+  getVacuumSessionsByUser(userId: string, scope?: { season: number; week?: number }, timeOfDay?: string): Promise<VacuumSession[]>;
   getVacuumSession(id: string): Promise<VacuumSession | undefined>;
   getVacuumSessionsBetween(userId: string, from: Date, to: Date): Promise<VacuumSession[]>;
   getVacuumSessionsByDate(userId: string, date: Date): Promise<VacuumSession[]>;
@@ -244,19 +245,25 @@ export class DatabaseStorage implements IStorage {
     return log;
   }
 
-  async getWorkoutLogsByUser(userId: string, week?: number): Promise<WorkoutLog[]> {
-    const where =
-      week !== undefined
-        ? and(eq(workoutLogs.userId, userId), eq(workoutLogs.week, week))
-        : eq(workoutLogs.userId, userId);
-    return db.select().from(workoutLogs).where(where).orderBy(desc(workoutLogs.date));
+  async getWorkoutLogsByUser(userId: string, scope?: { season: number; week?: number }): Promise<WorkoutLog[]> {
+    const conditions = [eq(workoutLogs.userId, userId)];
+    if (scope) conditions.push(eq(workoutLogs.season, scope.season));
+    if (scope?.week !== undefined) conditions.push(eq(workoutLogs.week, scope.week));
+    return db.select().from(workoutLogs).where(and(...conditions)).orderBy(desc(workoutLogs.date));
   }
 
-  async getCurrentWorkoutLog(userId: string, day: number, week: number): Promise<WorkoutLog | undefined> {
+  async getCurrentWorkoutLog(userId: string, season: number, day: number, week: number): Promise<WorkoutLog | undefined> {
     const [log] = await db
       .select()
       .from(workoutLogs)
-      .where(and(eq(workoutLogs.userId, userId), eq(workoutLogs.day, day), eq(workoutLogs.week, week)))
+      .where(
+        and(
+          eq(workoutLogs.userId, userId),
+          eq(workoutLogs.season, season),
+          eq(workoutLogs.day, day),
+          eq(workoutLogs.week, week),
+        ),
+      )
       .limit(1);
     return log;
   }
@@ -347,11 +354,13 @@ export class DatabaseStorage implements IStorage {
     return checkIn;
   }
 
-  async getCheckInByWeek(userId: string, week: number): Promise<WeeklyCheckIn | undefined> {
+  async getCheckInByWeek(userId: string, season: number, week: number): Promise<WeeklyCheckIn | undefined> {
     const [checkIn] = await db
       .select()
       .from(weeklyCheckIns)
-      .where(and(eq(weeklyCheckIns.userId, userId), eq(weeklyCheckIns.week, week)))
+      .where(
+        and(eq(weeklyCheckIns.userId, userId), eq(weeklyCheckIns.season, season), eq(weeklyCheckIns.week, week)),
+      )
       .limit(1);
     return checkIn;
   }
@@ -421,9 +430,14 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ── Cardio Sessions ──────────────────────────────────────────────────────
-  async getCardioSessionsByUser(userId: string, week?: number, type?: string): Promise<CardioSession[]> {
+  async getCardioSessionsByUser(
+    userId: string,
+    scope?: { season: number; week?: number },
+    type?: string,
+  ): Promise<CardioSession[]> {
     const conditions = [eq(cardioSessions.userId, userId)];
-    if (week !== undefined) conditions.push(eq(cardioSessions.week, week));
+    if (scope) conditions.push(eq(cardioSessions.season, scope.season));
+    if (scope?.week !== undefined) conditions.push(eq(cardioSessions.week, scope.week));
     if (type) conditions.push(eq(cardioSessions.type, type));
     return db.select().from(cardioSessions).where(and(...conditions)).orderBy(desc(cardioSessions.date));
   }
@@ -443,9 +457,14 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ── Vacuum Sessions ──────────────────────────────────────────────────────
-  async getVacuumSessionsByUser(userId: string, week?: number, timeOfDay?: string): Promise<VacuumSession[]> {
+  async getVacuumSessionsByUser(
+    userId: string,
+    scope?: { season: number; week?: number },
+    timeOfDay?: string,
+  ): Promise<VacuumSession[]> {
     const conditions = [eq(vacuumSessions.userId, userId)];
-    if (week !== undefined) conditions.push(eq(vacuumSessions.week, week));
+    if (scope) conditions.push(eq(vacuumSessions.season, scope.season));
+    if (scope?.week !== undefined) conditions.push(eq(vacuumSessions.week, scope.week));
     if (timeOfDay) conditions.push(eq(vacuumSessions.timeOfDay, timeOfDay));
     return db.select().from(vacuumSessions).where(and(...conditions)).orderBy(desc(vacuumSessions.date));
   }

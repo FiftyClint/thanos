@@ -3,6 +3,9 @@ import { z } from "zod";
 import { deloadDecisionSchema, startDeloadSchema, type WorkoutLog, type SetLog, type Exercise } from "@shared/schema";
 import { DELOAD_PRESCRIPTION, RETURN_PRESCRIPTION } from "@shared/program-rules";
 import { storage } from "../storage";
+import { activeSeason } from "../lib/season";
+import { applyProgramRules } from "../lib/program";
+import { calendarOf } from "@shared/seasons";
 import { logger } from "../logger";
 import { requireAuth, userIdOf } from "../middleware/auth";
 import { asyncHandler, badRequest, notFound } from "../middleware/error";
@@ -47,7 +50,10 @@ function summariseLift(exercise: Exercise, sets: SetLog[]): LiftPerformance | nu
 
 /** Turn stored workouts into the engine's input. */
 async function buildSignals(userId: string): Promise<SessionSignal[]> {
-  const workouts = (await storage.getWorkoutLogsByUser(userId))
+  // Only this season's sessions: week numbers and primaries restart with a new
+  // cycle, and comparing a bulk to the end of a cut would read as fatigue.
+  const { season } = await activeSeason(userId);
+  const workouts = (await storage.getWorkoutLogsByUser(userId, { season }))
     .filter((w) => w.completed)
     .slice(0, LOOKBACK_SESSIONS);
 
@@ -77,8 +83,12 @@ async function buildSignals(userId: string): Promise<SessionSignal[]> {
       if (summary) lifts.push(summary);
     }
 
-    const dayExercises = allExercises.filter(
-      (e) => e.day === workout.day && e.program === workout.program,
+    // Program rules decide which movement held the primary slot that week
+    // (Phase 4 swaps exercises in weeks 7-12).
+    const dayExercises = applyProgramRules(
+      allExercises.filter((e) => e.day === workout.day && e.program === workout.program),
+      workout.program,
+      workout.week,
     );
     const primaryExercise = findPrimaryExercise(dayExercises);
     const primary = primaryExercise ? (lifts.find((l) => l.exerciseId === primaryExercise.id) ?? null) : null;
@@ -112,13 +122,15 @@ fatigueRouter.get(
   asyncHandler(async (req, res) => {
     const userId = userIdOf(req);
 
-    const [signals, activeDeload, lastTier1] = await Promise.all([
+    const [signals, activeDeload, lastTier1, active] = await Promise.all([
       buildSignals(userId),
       storage.getActiveDeload(userId),
       storage.getLatestActionedTier1(userId),
+      activeSeason(userId),
     ]);
 
     const assessment = assessFatigue(signals, {
+      energyBalance: calendarOf(active.program).energyBalance,
       tier1Actioned:
         lastTier1 && lastTier1.startedAt
           ? {
@@ -164,10 +176,14 @@ fatigueRouter.post(
 
     // Record the triggers as they stood, so the decision stays auditable even
     // after more sessions change what the live assessment says.
-    const assessment = assessFatigue(await buildSignals(userId));
+    const active = await activeSeason(userId);
+    const assessment = assessFatigue(await buildSignals(userId), {
+      energyBalance: calendarOf(active.program).energyBalance,
+    });
 
     const event = await storage.createDeloadEvent({
       userId,
+      season: active.season,
       tier: data.tier,
       status: "active",
       subject: data.subject ?? null,

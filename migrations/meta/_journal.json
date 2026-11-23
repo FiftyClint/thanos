@@ -22,6 +22,13 @@
       "when": 1787740743326,
       "tag": "0002_exercise_substitutions",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1795369334745,
+      "tag": "0003_seasons",
+      "breakpoints": true
     }
   ]
 }
