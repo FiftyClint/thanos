@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { PROGRAMS } from "../server/seed";
 import { applyProgramRules, getCurrentPhase } from "../server/lib/program";
-import { bulkPhaseLabel, PLUS_ONE_TAG } from "@shared/bulk-rules";
+import { bulkPhaseLabel } from "@shared/bulk-rules";
 import { programWeek, seasonOf, calendarOf, LEGACY_SEASON } from "@shared/seasons";
 import { assessFatigue, type SessionSignal } from "../server/lib/fatigue";
 
@@ -44,6 +44,14 @@ describe("seasons", () => {
 });
 
 describe("Phase 4 program", () => {
+  const sets = (day: number, week: number, name: string) =>
+    working(day, week).find((e) => e.name === name)!.defaultSets;
+  const weekly = (week: number) => {
+    let total = 0;
+    for (let day = 1; day <= 6; day++) total += working(day, week).slice(1).reduce((n, e) => n + e.defaultSets, 0);
+    return total;
+  };
+
   it("opens every day with the stomach vacuum", () => {
     for (let day = 1; day <= 6; day++) expect(working(day, 2)[0].name).toBe("Stomach Vacuum");
   });
@@ -52,36 +60,47 @@ describe("Phase 4 program", () => {
     expect(phase4.some((e) => /smith/i.test(e.name) && /squat/i.test(e.name))).toBe(false);
   });
 
-  it("swaps to the Block 2 exercises in weeks 7-12 only", () => {
-    const names = (week: number) => working(1, week).map((e) => e.name);
-    expect(names(6)).toContain("Hack Squat");
-    expect(names(6)).not.toContain("Pendulum Squat");
-    expect(names(7)).toContain("Pendulum Squat");
-    expect(names(7)).not.toContain("Hack Squat");
-    expect(names(12)).toContain("Pendulum Squat");
-    expect(names(13)).toContain("Hack Squat");
+  it("puts biceps on leg days and triceps on pull days", () => {
+    const names = (day: number) => working(day, 2).map((e) => e.name).join(" | ");
+    for (const day of [1, 4]) expect(names(day)).toMatch(/Curl \(EZ|Incline DB Curl/);
+    expect(names(3)).toMatch(/Triceps/);
+    expect(names(6)).toMatch(/Triceps/);
+    for (const day of [2, 5]) expect(names(day)).not.toMatch(/Curl|Triceps/);
   });
 
-  it("shows exactly one movement per slot every week", () => {
-    for (let week = 1; week <= 16; week++) {
-      for (let day = 1; day <= 6; day++) {
-        const orders = working(day, week).map((e) => e.order);
-        expect(new Set(orders).size).toBe(orders.length);
-      }
+  it("has exactly one movement per slot", () => {
+    for (let day = 1; day <= 6; day++) {
+      const orders = working(day, 2).map((e) => e.order);
+      expect(new Set(orders).size).toBe(orders.length);
     }
   });
 
-  it("adds one set to the first lift Mon, Tue, Thu, Fri in the + weeks", () => {
-    for (const day of [1, 2, 4, 5]) {
-      const first = (week: number) => working(day, week)[1];
-      expect(first(3).defaultSets + 1).toBe(first(4).defaultSets);
-      expect(first(6).defaultSets).toBe(first(3).defaultSets);
-      expect(first(11).defaultSets).toBe(first(9).defaultSets + 1);
-      expect(first(16).defaultSets).toBe(first(14).defaultSets + 1);
-    }
-    for (const day of [3, 6]) {
-      expect(working(day, 4).every((e) => !(e.notes ?? "").includes(PLUS_ONE_TAG))).toBe(true);
-    }
+  it("matches the planned day totals in weeks 2-4", () => {
+    const total = (day: number) => working(day, 2).slice(1).reduce((n, e) => n + e.defaultSets, 0);
+    expect([1, 2, 3, 4, 5, 6].map(total)).toEqual([23, 15, 24, 23, 14, 21]);
+  });
+
+  it("ramps volume at weeks 5 and 9, then holds", () => {
+    expect(weekly(4)).toBe(weekly(2));
+    expect(weekly(5)).toBe(weekly(4) + 4);
+    expect(weekly(8)).toBe(weekly(5));
+    expect(weekly(9)).toBe(weekly(8) + 6);
+    expect(weekly(16)).toBe(weekly(9));
+    expect(sets(1, 4, "Hack Squat")).toBe(4);
+    expect(sets(1, 5, "Hack Squat")).toBe(5);
+    expect(sets(4, 5, "Lying Leg Curl")).toBe(4);
+    expect(sets(2, 8, "Machine Lateral Raise")).toBe(4);
+    expect(sets(2, 9, "Machine Lateral Raise")).toBe(5);
+    expect(sets(6, 9, "JM Press (Smith)")).toBe(3);
+  });
+
+  it("adds lengthened partials from week 9 and failure from week 13 on isolation only", () => {
+    const note = (day: number, week: number, name: string) =>
+      working(day, week).find((e) => e.name === name)!.notes ?? "";
+    expect(note(1, 8, "Leg Extension")).not.toContain("LAST SET");
+    expect(note(1, 9, "Leg Extension")).toContain("lengthened partials");
+    expect(note(1, 13, "Leg Extension")).toContain("true failure");
+    expect(note(1, 13, "Hack Squat")).not.toContain("LAST SET");
   });
 
   it("sets RIR 3 on every hypertrophy set in Week 1 and leaves the vacuum alone", () => {
@@ -91,18 +110,14 @@ describe("Phase 4 program", () => {
     expect(working(2, 2)[1].rir).toBe("1-2");
   });
 
-  it("matches the planned weekly sets for the priority muscles", () => {
-    const total = (day: number) => working(day, 2).slice(1).reduce((n, e) => n + e.defaultSets, 0);
-    expect([1, 2, 3, 4, 5, 6].map(total)).toEqual([20, 18, 20, 22, 21, 17]);
-  });
-
   it("labels the weeks", () => {
     expect(bulkPhaseLabel(1)).toBe("Re-entry");
-    expect(bulkPhaseLabel(4)).toBe("Block 1 Build +");
-    expect(bulkPhaseLabel(7)).toBe("Block 2 Build");
-    expect(bulkPhaseLabel(13)).toBe("Block 3 Build");
+    expect(bulkPhaseLabel(4)).toBe("Base");
+    expect(bulkPhaseLabel(5)).toBe("Build 1");
+    expect(bulkPhaseLabel(9)).toBe("Build 2");
+    expect(bulkPhaseLabel(13)).toBe("Peak");
     expect(bulkPhaseLabel(17)).toBe("Reassess");
-    expect(getCurrentPhase(4, "phase4")).toBe("Block 1 Build +");
+    expect(getCurrentPhase(4, "phase4")).toBe("Base");
     expect(getCurrentPhase(4, "phase3")).toBe("Base");
   });
 });
