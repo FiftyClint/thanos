@@ -267,7 +267,7 @@ Four blocks live in `server/seed/`, as plain data:
 | Phase 1 — Base | 117 | 6-day split |
 | Phase 2 — Build | 66 (+ shared warm-ups/cool-downs) | push/pull/legs |
 | Phase 3 — Cut | 129 | 6-day specialization |
-| Phase 4 — Bulk | 16 weeks from 11/23/2026, 2027 season | 6-day split, legs + back width priority |
+| Phase 4 — Bulk | 16 weeks from 11/23/2026, 2027 season | legs/push/pull ×2, arms on leg and pull days; legs + back width priority |
 
 ### Seasons
 
@@ -281,10 +281,13 @@ restarts at Week 1 without overwriting, or being confused with, the last one.
 Migration `0003_seasons` backfills all existing rows as 2026.
 
 Phase 4's weekly structure (`shared/bulk-rules.ts`) is applied at read time:
-Week 1 is re-entry at RIR 3, weeks 7-12 swap to the Block 2 exercises, and
-weeks 4-5, 10-11 and 15-16 add a set to the first lift on Mon, Tue, Thu and
-Fri. Deloads stay fatigue-triggered; because the bulk runs in a surplus, the
-cut-only "normal drift" confound check is off for it.
+Week 1 is re-entry at RIR 3; weeks 2-4 are Base; from week 5 the main lift on
+Days 1, 3, 4 and 6 gets a set; from week 9 the first lateral raise on Days 2
+and 5 and the first arm exercise on Days 1, 3, 4 and 6 get a set, and
+isolation work adds lengthened partials on the last set; weeks 13-16 (Peak)
+take that last isolation set to true failure. Deloads stay fatigue-triggered;
+because the bulk runs in a surplus, the cut-only "normal drift" confound check
+is off for it.
 
 Each exercise is keyed by `(program, day, order, number)`. Editing a row updates
 that exercise **in place**, so the sets you have already logged against it stay

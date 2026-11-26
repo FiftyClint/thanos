@@ -58,14 +58,9 @@ export function getPhaseColor(phase: string): string {
       return "bg-red-600";
     case "Re-entry":
       return "bg-slate-600";
-    case "Block 1 Build":
-    case "Block 1 Build +":
-      return "bg-blue-600";
-    case "Block 2 Build":
-    case "Block 2 Build +":
+    case "Build 1":
       return "bg-purple-600";
-    case "Block 3 Build":
-    case "Block 3 Build +":
+    case "Build 2":
       return "bg-orange-600";
     default:
       return "bg-gray-600";
@@ -90,12 +85,12 @@ export function getDayName(day: number): string {
 export function getDayFocus(day: number, program?: string): string {
   if (program === 'phase4') {
     const focuses: Record<number, string> = {
-      1: "Legs A (Quads)",
-      2: "Back A (Width)",
-      3: "Chest + Delts + Triceps",
-      4: "Legs B (Posterior + Quads)",
-      5: "Back B (Width + Thickness)",
-      6: "Delts + Upper Chest + Arms",
+      1: "Legs A (Quads) + Biceps",
+      2: "Push A (Chest + Side Delts)",
+      3: "Pull A (Lat Width) + Triceps",
+      4: "Legs B (Posterior + Quads) + Biceps",
+      5: "Push B (Upper Chest + Side Delts)",
+      6: "Pull B (Lat Thickness + Rear Delts) + Triceps",
     };
     return focuses[day] || "";
   }

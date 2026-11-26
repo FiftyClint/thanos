@@ -32,12 +32,12 @@ const DAY_TYPE: Record<number, string> = {
 
 /** Phase 4 has its own split; Notion creates these select options on first use. */
 const PHASE4_DAY_TYPE: Record<number, string> = {
-  1: "Legs A (Quads)",
-  2: "Back A (Width)",
-  3: "Chest + Delts + Triceps",
-  4: "Legs B (Posterior + Quads)",
-  5: "Back B (Width + Thickness)",
-  6: "Delts + Upper Chest + Arms",
+  1: "Legs A (Quads) + Biceps",
+  2: "Push A (Chest + Side Delts)",
+  3: "Pull A (Lat Width) + Triceps",
+  4: "Legs B (Posterior + Quads) + Biceps",
+  5: "Push B (Upper Chest + Side Delts)",
+  6: "Pull B (Lat Thickness + Rear Delts) + Triceps",
 };
 
 function dayTypeFor(workoutLog: WorkoutLog): string {
